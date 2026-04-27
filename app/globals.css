@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #07101E;
+  --bg-secondary: #0D1C32;
+  --bg-card: #112240;
+  --bg-card-hover: #162A4E;
+  --gold: #C9A84C;
+  --gold-light: #E8C86A;
+  --gold-bright: #F5D060;
+  --blue-accent: #1A5CB8;
+  --blue-bright: #2D7DD2;
+  --text-primary: #FFFFFF;
+  --text-muted: #6B8BAE;
+  --border: #1A3358;
+  --green: #22C55E;
+  --yellow: #EAB308;
+  --red: #EF4444;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+.gold-text {
+  background: linear-gradient(135deg, #C9A84C 0%, #F5D060 60%, #C9A84C 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gold-border-glow {
+  box-shadow: 0 0 20px rgba(201, 168, 76, 0.15), 0 0 40px rgba(201, 168, 76, 0.05);
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-secondary); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold); }
+
+@keyframes pulse-gold {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.pulse-gold {
+  animation: pulse-gold 2s ease-in-out infinite;
+}
