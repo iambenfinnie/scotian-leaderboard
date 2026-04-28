@@ -157,21 +157,28 @@ async function fetchLogPage(
   fromDate: string,
   toDate: string,
 ): Promise<{ items: StatusLog[]; totalCount: number }> {
-  const res = await fetch(
-    `${BASE}/customers/status-logs?from_date=${fromDate}&to_date=${toDate}&per_page=100&page=${page}`,
-    { headers: { 'x-api-key': API_KEY! }, cache: 'no-store' },
-  );
-  if (!res.ok) throw new Error(`Status logs API error: ${res.status}`);
-  const json = await res.json();
-  const result = json.result ?? json;
-  return {
-    items: result.data ?? [],
-    totalCount: result.totalCount ?? 0,
-  };
+  // Retry on 429 with exponential backoff
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch(
+      `${BASE}/customers/status-logs?from_date=${fromDate}&to_date=${toDate}&per_page=100&page=${page}`,
+      { headers: { 'x-api-key': API_KEY! }, cache: 'no-store' },
+    );
+    if (res.status === 429) {
+      await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
+      continue;
+    }
+    if (!res.ok) throw new Error(`Status logs API error: ${res.status}`);
+    const json = await res.json();
+    const result = json.result ?? json;
+    return { items: result.data ?? [], totalCount: result.totalCount ?? 0 };
+  }
+  throw new Error('Status logs API error: 429 after retries');
 }
 
 async function fetchAll<T>(
   fetchFn: (page: number) => Promise<{ items: T[]; totalPages?: number; totalCount?: number }>,
+  batchSize = 10,
+  batchDelayMs = 0,
 ): Promise<T[]> {
   const first = await fetchFn(1);
   const totalPages =
@@ -180,16 +187,40 @@ async function fetchAll<T>(
   if (totalPages <= 1) return first.items;
 
   const all = [...first.items];
-  const BATCH = 10;
 
-  for (let start = 2; start <= totalPages; start += BATCH) {
-    const end = Math.min(start + BATCH - 1, totalPages);
+  for (let start = 2; start <= totalPages; start += batchSize) {
+    const end = Math.min(start + batchSize - 1, totalPages);
     const pages = Array.from({ length: end - start + 1 }, (_, i) => start + i);
     const results = await Promise.all(pages.map(p => fetchFn(p)));
     for (const r of results) all.push(...r.items);
+    if (batchDelayMs > 0 && end < totalPages) {
+      await new Promise(r => setTimeout(r, batchDelayMs));
+    }
   }
 
   return all;
+}
+
+// ── Module-level cache to avoid re-fetching on every auto-refresh ─────────────
+
+interface LogCache {
+  data: StatusLog[];
+  expiresAt: number;
+}
+const logCacheStore = new Map<string, LogCache>();
+
+async function fetchStatusLogs(fromDate: string, toDate: string): Promise<StatusLog[]> {
+  const key = `${fromDate}:${toDate}`;
+  const cached = logCacheStore.get(key);
+  if (cached && Date.now() < cached.expiresAt) return cached.data;
+
+  const data = await fetchAll(
+    p => fetchLogPage(p, fromDate, toDate).then(r => ({ items: r.items, totalPages: Math.ceil((r.totalCount || 1) / 100) })),
+    3,   // 3 concurrent requests — stay under rate limit
+    150, // 150ms pause between batches
+  );
+  logCacheStore.set(key, { data, expiresAt: Date.now() + 10 * 60 * 1000 }); // 10-min TTL
+  return data;
 }
 
 // ── Data processing ───────────────────────────────────────────────────────────
@@ -417,7 +448,7 @@ export async function GET(req: Request) {
       // Fetch appointments and status logs in parallel
       const [appointments, statusLogs] = await Promise.all([
         fetchAll(p => fetchApptPage(p, fromDate, toDate)),
-        fetchAll(p => fetchLogPage(p, fromDate, toDate).then(r => ({ items: r.items, totalPages: Math.ceil(r.totalCount / 100) }))),
+        fetchStatusLogs(fromDate, toDate),
       ]);
 
       setterMap = buildSetterMap(appointments, statusLogs);
