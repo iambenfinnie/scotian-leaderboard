@@ -52,6 +52,7 @@ interface ApiResponse {
   year: number;
   availableYears: number[];
   isDemo: boolean;
+  doorStatsUnavailable?: boolean;
   updatedAt: string;
   error?: string;
 }
@@ -330,6 +331,23 @@ export default function SettersPage() {
       </header>
 
       <main style={{ maxWidth: 1200 }} className="mx-auto px-4 sm:px-6 py-8 space-y-8">
+
+        {/* ── Door stats unavailable banner ───────────────────────────────── */}
+        {data?.doorStatsUnavailable && (
+          <div
+            className="rounded-lg px-4 py-3 text-sm flex items-center gap-3"
+            style={{
+              background: 'rgba(96,165,250,0.08)',
+              border: '1px solid rgba(96,165,250,0.3)',
+              color: '#60A5FA',
+            }}
+          >
+            <span className="font-bold shrink-0">Door Stats Unavailable</span>
+            <span style={{ color: 'var(--text-muted)' }}>
+              RepCard rate-limited the door knock data. Appointment stats are accurate. Door columns will show — until the cache warms up.
+            </span>
+          </div>
+        )}
 
         {/* ── Demo banner ─────────────────────────────────────────────────── */}
         {data?.isDemo && (

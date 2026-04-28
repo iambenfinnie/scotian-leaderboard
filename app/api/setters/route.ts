@@ -159,19 +159,20 @@ async function fetchApptPage(
   throw new Error('Appointments API error: 429 after retries');
 }
 
+const LOG_PER_PAGE = 1000; // try large page size to reduce total requests
+
 async function fetchLogPage(
   page: number,
   fromDate: string,
   toDate: string,
 ): Promise<{ items: StatusLog[]; totalCount: number }> {
-  // Retry on 429 with exponential backoff
   for (let attempt = 0; attempt < 4; attempt++) {
     const res = await fetch(
-      `${BASE}/customers/status-logs?from_date=${fromDate}&to_date=${toDate}&per_page=100&page=${page}`,
+      `${BASE}/customers/status-logs?from_date=${fromDate}&to_date=${toDate}&per_page=${LOG_PER_PAGE}&page=${page}`,
       { headers: { 'x-api-key': API_KEY! }, cache: 'no-store' },
     );
     if (res.status === 429) {
-      await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
       continue;
     }
     if (!res.ok) throw new Error(`Status logs API error: ${res.status}`);
@@ -235,9 +236,9 @@ async function fetchStatusLogs(fromDate: string, toDate: string): Promise<Status
   if (cached && Date.now() < cached.expiresAt) return cached.data;
 
   const data = await fetchAll(
-    p => fetchLogPage(p, fromDate, toDate).then(r => ({ items: r.items, totalPages: Math.ceil((r.totalCount || 1) / 100) })),
-    3,   // 3 concurrent pages
-    150, // 150ms between batches
+    p => fetchLogPage(p, fromDate, toDate).then(r => ({ items: r.items, totalPages: Math.ceil((r.totalCount || 1) / LOG_PER_PAGE) })),
+    2,   // 2 concurrent pages
+    300, // 300ms between batches
   );
   logCacheStore.set(key, { data, expiresAt: Date.now() + CACHE_TTL });
   return data;
@@ -461,13 +462,21 @@ export async function GET(req: Request) {
     let setterMap: Map<number, SetterAccum>;
     let isDemo = false;
 
+    let doorStatsUnavailable = false;
+
     if (!API_KEY) {
       setterMap = getDemoData();
       isDemo = true;
     } else {
-      // Fetch sequentially to avoid overwhelming RepCard's rate limit
       const appointments = await fetchAppointments(fromDate, toDate);
-      const statusLogs = await fetchStatusLogs(fromDate, toDate);
+
+      let statusLogs: StatusLog[] = [];
+      try {
+        statusLogs = await fetchStatusLogs(fromDate, toDate);
+      } catch (e) {
+        console.warn('Door stats unavailable:', e);
+        doorStatsUnavailable = true;
+      }
 
       setterMap = buildSetterMap(appointments, statusLogs);
     }
@@ -510,6 +519,7 @@ export async function GET(req: Request) {
       year,
       availableYears,
       isDemo,
+      doorStatsUnavailable,
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
