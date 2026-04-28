@@ -136,11 +136,28 @@ export default function LeaderboardPage() {
 
   const currentWeekKey = getCurrentWeekKey();
   const currentMonthKey = getCurrentMonthKey();
+  const lastYear = new Date().getFullYear() - 1;
 
   // ── Compute display data based on selected tab ───────────────────────────
   const displayData: CloserStats[] = (() => {
     if (!data) return [];
     if (selectedMonth === 'ytd') return data.leaderboard;
+    if (selectedMonth === 'last-year') {
+      const prefix = `${lastYear}-`;
+      return data.leaderboard
+        .map(c => ({
+          ...c,
+          revenue: Object.entries(c.monthly)
+            .filter(([k]) => k.startsWith(prefix))
+            .reduce((s, [, v]) => s + v.revenue, 0),
+          deals: Object.entries(c.monthly)
+            .filter(([k]) => k.startsWith(prefix))
+            .reduce((s, [, v]) => s + v.deals, 0),
+        }))
+        .filter(c => c.revenue > 0)
+        .sort((a, b) => b.revenue - a.revenue)
+        .map((c, i) => ({ ...c, rank: i + 1 }));
+    }
     const periodMap = isWeekKey(selectedMonth) ? 'weekly' : 'monthly';
     return data.leaderboard
       .map(c => ({
@@ -157,6 +174,7 @@ export default function LeaderboardPage() {
 
   const periodLabel = (() => {
     if (selectedMonth === 'ytd') return 'YTD';
+    if (selectedMonth === 'last-year') return `${lastYear}`;
     if (isWeekKey(selectedMonth)) {
       if (selectedMonth === currentWeekKey) return 'This Week';
       return data?.weeks.find(w => w.key === selectedMonth)?.label ?? selectedMonth;
@@ -293,6 +311,9 @@ export default function LeaderboardPage() {
           {/* YTD */}
           <Tab active={selectedMonth === 'ytd'} onClick={() => { setSelectedMonth('ytd'); setShowPastMonths(false); setShowPastWeeks(false); }}>
             📊 YTD
+          </Tab>
+          <Tab active={selectedMonth === 'last-year'} onClick={() => { setSelectedMonth('last-year'); setShowPastMonths(false); setShowPastWeeks(false); }}>
+            🗓 {lastYear}
           </Tab>
 
           {/* This Month + previous months dropdown */}
