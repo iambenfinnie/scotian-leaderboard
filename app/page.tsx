@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import Link from 'next/link';
 
 interface PeriodStats {
   revenue: number;
@@ -251,23 +250,14 @@ export default function LeaderboardPage() {
                 ? 'Refreshing…'
                 : `Auto-refresh in ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, '0')}`}
             </p>
-            <div className="flex items-center gap-2">
-              <Link
-                href="/setters"
-                className="text-xs px-3 py-1.5 rounded-md font-medium transition-all hover:opacity-80"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-card)' }}
-              >
-                Setter Board →
-              </Link>
-              <button
-                onClick={() => fetchData(true)}
-                disabled={refreshing}
-                className="text-xs px-3 py-1.5 rounded-md font-medium transition-all hover:opacity-80 disabled:opacity-40"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-card)' }}
-              >
-                {refreshing ? '↻ Refreshing…' : '↻ Refresh Now'}
-              </button>
-            </div>
+            <button
+              onClick={() => fetchData(true)}
+              disabled={refreshing}
+              className="text-xs px-3 py-1.5 rounded-md font-medium transition-all hover:opacity-80 disabled:opacity-40"
+              style={{ border: '1px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-card)' }}
+            >
+              {refreshing ? '↻ Refreshing…' : '↻ Refresh Now'}
+            </button>
           </div>
         </div>
       </header>

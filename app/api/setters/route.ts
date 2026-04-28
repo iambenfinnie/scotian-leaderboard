@@ -3,19 +3,26 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 const API_KEY = process.env.REPCARD_API_KEY;
-const BASE = 'https://api.repcard.com';
+const BASE = 'https://app.repcard.com/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface RepCardAppointment {
-  id: string;
-  status: string;
-  appointment_date?: string;
-  scheduled_at?: string;
-  created_at?: string;
-  rep?: { id: string; name?: string; first_name?: string; last_name?: string };
-  user?: { id: string; name?: string; first_name?: string; last_name?: string };
-  setter?: { id: string; name?: string; first_name?: string; last_name?: string };
+  id: number;
+  startAt: string; // "YYYY-MM-DD HH:MM:SS"
+  createdAt: string;
+  setter: {
+    id: number;
+    fullName: string;
+  } | null;
+  status: {
+    id: number;
+    title: string;
+    category: {
+      id: number;
+      title: string; // "Held" | "Not Held"
+    };
+  } | null;
 }
 
 type NormStatus = 'sat' | 'noshow' | 'cancel' | 'pending';
@@ -37,15 +44,39 @@ interface SetterAccum {
   weekly: Record<string, PeriodCounts>;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Status classification ─────────────────────────────────────────────────────
+// Based on Scotian Heat Pumps' actual RepCard outcome setup:
+//   Held category   → appointment was sat
+//   "APT SAT BUT NOT SOLD" / "SAT NOT CLOSED" → sat despite being in Not Held
+//   "NO SHOW" / "Not Interested" (Not Held) → no-show
+//   "Rescheduled"   → cancelled/rescheduled (excluded from show rate)
+//   null status     → upcoming/pending
 
-function toNormStatus(raw: string): NormStatus | null {
-  const s = (raw ?? '').toLowerCase().replace(/[\s\-]/g, '_');
-  if (/sat|complet|shown|sold/.test(s)) return 'sat';
-  if (/no.?show|missed/.test(s)) return 'noshow';
-  if (/cancel|reschedul/.test(s)) return 'cancel';
-  if (/pending|schedul|upcoming|confirm/.test(s)) return 'pending';
-  return null;
+function classifyStatus(appt: RepCardAppointment): NormStatus {
+  if (!appt.status) return 'pending';
+
+  const title = appt.status.title.toUpperCase();
+  const category = appt.status.category?.title;
+
+  // Appointments that sat even though they're in "Not Held" category
+  if (title.includes('SAT')) return 'sat';
+
+  if (category === 'Held') return 'sat';
+
+  // Explicit rescheduled → treat as cancel (excluded from show rate calc)
+  if (title.includes('RESCHEDUL')) return 'cancel';
+
+  // Everything else in "Not Held" is a no-show (NO SHOW, Not Interested at door, etc.)
+  return 'noshow';
+}
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+
+function parseRepCardDate(s: string): Date | null {
+  if (!s) return null;
+  // "2025-04-07 22:00:00" → replace space with T for standard parsing
+  const d = new Date(s.replace(' ', 'T'));
+  return isNaN(d.getTime()) ? null : d;
 }
 
 function monthKey(d: Date) {
@@ -80,31 +111,38 @@ function emptyPeriod(): PeriodCounts {
   return { sat: 0, noshow: 0, cancel: 0, pending: 0 };
 }
 
-// ── RepCard API fetch (paginated) ─────────────────────────────────────────────
+function cleanName(raw: string): string {
+  // Strip the ❌ prefix RepCard adds to deactivated users
+  return raw.replace(/^[^\w\s]*\s*/, '').trim();
+}
 
-async function fetchRepCardAppointments(): Promise<RepCardAppointment[]> {
+// ── RepCard API fetch (paginated, YTD) ────────────────────────────────────────
+
+async function fetchAppointments(): Promise<RepCardAppointment[]> {
   const all: RepCardAppointment[] = [];
+  const fromDate = `${new Date().getFullYear()}-01-01`;
   let page = 1;
 
   while (true) {
-    const res = await fetch(`${BASE}/v1/appointments?page=${page}&per_page=100`, {
-      headers: {
-        Authorization: `Bearer ${API_KEY}`,
-        'Content-Type': 'application/json',
-      },
+    const url = `${BASE}/appointments?from_date=${fromDate}&per_page=100&page=${page}`;
+    const res = await fetch(url, {
+      headers: { 'x-api-key': API_KEY! },
       cache: 'no-store',
     });
 
     if (!res.ok) throw new Error(`RepCard API error: ${res.status} ${res.statusText}`);
 
     const json = await res.json();
-    // Handle different response shapes RepCard might use
-    const items: RepCardAppointment[] =
-      json.data ?? json.appointments ?? json.results ?? (Array.isArray(json) ? json : []);
+    if (!json.status) throw new Error(json.message ?? 'RepCard API returned an error');
+
+    const result = json.result ?? {};
+    const items: RepCardAppointment[] = result.data ?? [];
 
     if (!Array.isArray(items) || items.length === 0) break;
     all.push(...items);
-    if (items.length < 100 || all.length >= 5000) break;
+
+    const totalPages: number = result.totalPages ?? 1;
+    if (page >= totalPages) break;
     page++;
   }
 
@@ -117,17 +155,12 @@ function processAppointments(appointments: RepCardAppointment[]) {
   const setters = new Map<string, SetterAccum>();
 
   for (const appt of appointments) {
-    const person = appt.setter ?? appt.rep ?? appt.user;
-    const name =
-      person?.name ??
-      (person?.first_name && person?.last_name
-        ? `${person.first_name} ${person.last_name}`
-        : person?.first_name ?? null);
+    if (!appt.setter) continue;
 
+    const name = cleanName(appt.setter.fullName);
     if (!name) continue;
 
-    const norm = toNormStatus(appt.status);
-    if (!norm) continue;
+    const norm = classifyStatus(appt);
 
     if (!setters.has(name)) {
       setters.set(name, {
@@ -144,17 +177,14 @@ function processAppointments(appointments: RepCardAppointment[]) {
     const s = setters.get(name)!;
     s[norm]++;
 
-    const dateStr = appt.appointment_date ?? appt.scheduled_at ?? appt.created_at;
-    if (dateStr) {
-      const d = new Date(dateStr);
-      if (!isNaN(d.getTime())) {
-        const mk = monthKey(d);
-        const wk = weekKey(d);
-        if (!s.monthly[mk]) s.monthly[mk] = emptyPeriod();
-        if (!s.weekly[wk]) s.weekly[wk] = emptyPeriod();
-        s.monthly[mk][norm]++;
-        s.weekly[wk][norm]++;
-      }
+    const d = parseRepCardDate(appt.startAt);
+    if (d) {
+      const mk = monthKey(d);
+      const wk = weekKey(d);
+      if (!s.monthly[mk]) s.monthly[mk] = emptyPeriod();
+      if (!s.weekly[wk]) s.weekly[wk] = emptyPeriod();
+      s.monthly[mk][norm]++;
+      s.weekly[wk][norm]++;
     }
   }
 
@@ -191,12 +221,13 @@ function getDemoData(): Map<string, SetterAccum> {
   }
 
   const setters = new Map<string, SetterAccum>();
+  const monthFracs = [0.35, 0.3, 0.22, 0.13];
+  const weekFracs = [0.2, 0.18, 0.16, 0.14, 0.12, 0.08, 0.07, 0.05];
 
   for (const sd of raw) {
     const monthly: SetterAccum['monthly'] = {};
     const weekly: SetterAccum['weekly'] = {};
 
-    const monthFracs = [0.35, 0.3, 0.22, 0.13];
     for (let i = 0; i < months.length; i++) {
       const f = monthFracs[i];
       monthly[months[i]] = {
@@ -207,7 +238,6 @@ function getDemoData(): Map<string, SetterAccum> {
       };
     }
 
-    const weekFracs = [0.2, 0.18, 0.16, 0.14, 0.12, 0.08, 0.07, 0.05];
     for (let i = 0; i < weeks.length; i++) {
       const f = weekFracs[i];
       weekly[weeks[i]] = {
@@ -235,7 +265,7 @@ export async function GET() {
       setterMap = getDemoData();
       isDemo = true;
     } else {
-      const appointments = await fetchRepCardAppointments();
+      const appointments = await fetchAppointments();
       setterMap = processAppointments(appointments);
     }
 

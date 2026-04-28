@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import Link from 'next/link';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -69,6 +68,11 @@ function getCurrentWeekKey() {
   return monday.toISOString().slice(0, 10);
 }
 
+function getCurrentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function isWeekKey(key: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(key);
 }
@@ -86,6 +90,8 @@ export default function SettersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<string>('ytd');
+  const [showPastMonths, setShowPastMonths] = useState(false);
+  const [showPastWeeks, setShowPastWeeks] = useState(false);
   const [countdown, setCountdown] = useState(REFRESH_SECONDS);
   const [refreshing, setRefreshing] = useState(false);
   const countdownRef = useRef(REFRESH_SECONDS);
@@ -123,6 +129,7 @@ export default function SettersPage() {
   }, [fetchData]);
 
   const currentWeekKey = getCurrentWeekKey();
+  const currentMonthKey = getCurrentMonthKey();
 
   // ── Compute display rows based on selected period ─────────────────────────
   const displaySetters: SetterStats[] = (() => {
@@ -253,19 +260,7 @@ export default function SettersPage() {
                 ? 'Refreshing…'
                 : `Auto-refresh in ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, '0')}`}
             </p>
-            <div className="flex items-center gap-2">
-              <Link
-                href="/"
-                className="text-xs px-3 py-1.5 rounded-md font-medium transition-all hover:opacity-80"
-                style={{
-                  border: '1px solid var(--border)',
-                  color: 'var(--text-muted)',
-                  background: 'var(--bg-card)',
-                }}
-              >
-                ← Sales Board
-              </Link>
-              <button
+            <button
                 onClick={() => fetchData(true)}
                 disabled={refreshing}
                 className="text-xs px-3 py-1.5 rounded-md font-medium transition-all hover:opacity-80 disabled:opacity-40"
@@ -277,7 +272,6 @@ export default function SettersPage() {
               >
                 {refreshing ? '↻ Refreshing…' : '↻ Refresh Now'}
               </button>
-            </div>
           </div>
         </div>
       </header>
@@ -318,25 +312,130 @@ export default function SettersPage() {
         </div>
 
         {/* ── Period tabs ──────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap gap-2">
-          <Tab active={selectedPeriod === 'ytd'} onClick={() => setSelectedPeriod('ytd')}>
-            📊 YTD
-          </Tab>
-          <Tab
-            active={selectedPeriod === currentWeekKey}
-            onClick={() => setSelectedPeriod(currentWeekKey)}
+        <div className="flex flex-wrap gap-2 items-center">
+
+          {/* YTD */}
+          <button
+            onClick={() => { setSelectedPeriod('ytd'); setShowPastMonths(false); setShowPastWeeks(false); }}
+            className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all"
+            style={{
+              background: selectedPeriod === 'ytd' ? 'var(--gold)' : 'var(--bg-card)',
+              color: selectedPeriod === 'ytd' ? '#000' : 'var(--text-muted)',
+              border: selectedPeriod === 'ytd' ? '1px solid var(--gold)' : '1px solid var(--border)',
+              fontWeight: selectedPeriod === 'ytd' ? 700 : 500,
+            }}
           >
-            📅 This Week
-          </Tab>
-          {data?.months.map(m => (
-            <Tab
-              key={m.key}
-              active={selectedPeriod === m.key}
-              onClick={() => setSelectedPeriod(m.key)}
-            >
-              {m.label}
-            </Tab>
-          ))}
+            📊 YTD
+          </button>
+
+          {/* This Month + dropdown */}
+          {data && data.months.length > 0 && (
+            <div className="relative">
+              <div className="flex items-stretch rounded-lg overflow-hidden" style={{ border: selectedPeriod === currentMonthKey || data.months.slice(1).some(m => m.key === selectedPeriod) ? '1px solid var(--gold)' : '1px solid var(--border)' }}>
+                <button
+                  onClick={() => { setSelectedPeriod(currentMonthKey); setShowPastMonths(false); setShowPastWeeks(false); }}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
+                  style={{
+                    background: selectedPeriod === currentMonthKey || data.months.slice(1).some(m => m.key === selectedPeriod) ? 'rgba(201,168,76,0.1)' : 'var(--bg-card)',
+                    color: selectedPeriod === currentMonthKey || data.months.slice(1).some(m => m.key === selectedPeriod) ? 'var(--gold)' : 'var(--text-muted)',
+                    fontWeight: selectedPeriod === currentMonthKey || data.months.slice(1).some(m => m.key === selectedPeriod) ? 700 : 500,
+                  }}
+                >
+                  📆 {data.months.slice(1).find(m => m.key === selectedPeriod)?.label ?? 'This Month'}
+                </button>
+                {data.months.length > 1 && (
+                  <button
+                    onClick={() => { setShowPastMonths(p => !p); setShowPastWeeks(false); }}
+                    className="px-2 py-1.5 text-xs transition-all"
+                    style={{
+                      background: showPastMonths ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.05)',
+                      color: 'var(--text-muted)',
+                      borderLeft: '1px solid var(--border)',
+                    }}
+                  >
+                    {showPastMonths ? '▲' : '▾'}
+                  </button>
+                )}
+              </div>
+              {showPastMonths && (
+                <div
+                  className="absolute top-full left-0 mt-1 rounded-xl overflow-hidden z-20 min-w-max"
+                  style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
+                >
+                  {data.months.slice(1).map(m => (
+                    <button
+                      key={m.key}
+                      onClick={() => { setSelectedPeriod(m.key); setShowPastMonths(false); }}
+                      className="block w-full text-left px-4 py-2.5 text-sm"
+                      style={{
+                        background: selectedPeriod === m.key ? 'rgba(201,168,76,0.1)' : 'transparent',
+                        color: selectedPeriod === m.key ? 'var(--gold)' : 'var(--text-muted)',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = selectedPeriod === m.key ? 'rgba(201,168,76,0.1)' : 'transparent')}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* This Week + dropdown */}
+          {data && data.weeks.length > 0 && (
+            <div className="relative">
+              <div className="flex items-stretch rounded-lg overflow-hidden" style={{ border: isWeekKey(selectedPeriod) ? '1px solid var(--gold)' : '1px solid var(--border)' }}>
+                <button
+                  onClick={() => { setSelectedPeriod(currentWeekKey); setShowPastWeeks(false); setShowPastMonths(false); }}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
+                  style={{
+                    background: isWeekKey(selectedPeriod) ? 'rgba(201,168,76,0.1)' : 'var(--bg-card)',
+                    color: isWeekKey(selectedPeriod) ? 'var(--gold)' : 'var(--text-muted)',
+                    fontWeight: isWeekKey(selectedPeriod) ? 700 : 500,
+                  }}
+                >
+                  📅 {data.weeks.find(w => w.key === selectedPeriod)?.label ?? 'This Week'}
+                </button>
+                {data.weeks.length > 1 && (
+                  <button
+                    onClick={() => { setShowPastWeeks(p => !p); setShowPastMonths(false); }}
+                    className="px-2 py-1.5 text-xs transition-all"
+                    style={{
+                      background: showPastWeeks ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.05)',
+                      color: 'var(--text-muted)',
+                      borderLeft: '1px solid var(--border)',
+                    }}
+                  >
+                    {showPastWeeks ? '▲' : '▾'}
+                  </button>
+                )}
+              </div>
+              {showPastWeeks && (
+                <div
+                  className="absolute top-full left-0 mt-1 rounded-xl overflow-hidden z-20 min-w-max"
+                  style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
+                >
+                  {data.weeks.slice(1).map(w => (
+                    <button
+                      key={w.key}
+                      onClick={() => { setSelectedPeriod(w.key); setShowPastWeeks(false); }}
+                      className="block w-full text-left px-4 py-2.5 text-sm"
+                      style={{
+                        background: selectedPeriod === w.key ? 'rgba(201,168,76,0.1)' : 'transparent',
+                        color: selectedPeriod === w.key ? 'var(--gold)' : 'var(--text-muted)',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = selectedPeriod === w.key ? 'rgba(201,168,76,0.1)' : 'transparent')}
+                    >
+                      {w.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
 
         {/* ── Setter table ─────────────────────────────────────────────────── */}
@@ -825,31 +924,6 @@ function StatCard({
         </p>
       )}
     </div>
-  );
-}
-
-function Tab({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all"
-      style={{
-        background: active ? 'var(--gold)' : 'var(--bg-card)',
-        color: active ? '#000' : 'var(--text-muted)',
-        border: active ? '1px solid var(--gold)' : '1px solid var(--border)',
-        fontWeight: active ? 700 : 500,
-      }}
-    >
-      {children}
-    </button>
   );
 }
 
