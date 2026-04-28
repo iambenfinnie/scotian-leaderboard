@@ -141,15 +141,22 @@ async function fetchApptPage(
   fromDate: string,
   toDate: string,
 ): Promise<{ items: RepCardAppointment[]; totalPages: number }> {
-  const res = await fetch(
-    `${BASE}/appointments?from_date=${fromDate}&to_date=${toDate}&per_page=100&page=${page}`,
-    { headers: { 'x-api-key': API_KEY! }, cache: 'no-store' },
-  );
-  if (!res.ok) throw new Error(`Appointments API error: ${res.status}`);
-  const json = await res.json();
-  if (!json.status) throw new Error(json.message ?? 'RepCard error');
-  const result = json.result ?? {};
-  return { items: result.data ?? [], totalPages: result.totalPages ?? 1 };
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch(
+      `${BASE}/appointments?from_date=${fromDate}&to_date=${toDate}&per_page=100&page=${page}`,
+      { headers: { 'x-api-key': API_KEY! }, cache: 'no-store' },
+    );
+    if (res.status === 429) {
+      await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
+      continue;
+    }
+    if (!res.ok) throw new Error(`Appointments API error: ${res.status}`);
+    const json = await res.json();
+    if (!json.status) throw new Error(json.message ?? 'RepCard error');
+    const result = json.result ?? {};
+    return { items: result.data ?? [], totalPages: result.totalPages ?? 1 };
+  }
+  throw new Error('Appointments API error: 429 after retries');
 }
 
 async function fetchLogPage(
@@ -203,11 +210,24 @@ async function fetchAll<T>(
 
 // ── Module-level cache to avoid re-fetching on every auto-refresh ─────────────
 
-interface LogCache {
-  data: StatusLog[];
-  expiresAt: number;
+interface Cache<T> { data: T; expiresAt: number; }
+const apptCache = new Map<string, Cache<RepCardAppointment[]>>();
+const logCacheStore = new Map<string, Cache<StatusLog[]>>();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+async function fetchAppointments(fromDate: string, toDate: string): Promise<RepCardAppointment[]> {
+  const key = `${fromDate}:${toDate}`;
+  const cached = apptCache.get(key);
+  if (cached && Date.now() < cached.expiresAt) return cached.data;
+
+  const data = await fetchAll(
+    p => fetchApptPage(p, fromDate, toDate),
+    3,   // 3 concurrent pages
+    150, // 150ms between batches
+  );
+  apptCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL });
+  return data;
 }
-const logCacheStore = new Map<string, LogCache>();
 
 async function fetchStatusLogs(fromDate: string, toDate: string): Promise<StatusLog[]> {
   const key = `${fromDate}:${toDate}`;
@@ -216,10 +236,10 @@ async function fetchStatusLogs(fromDate: string, toDate: string): Promise<Status
 
   const data = await fetchAll(
     p => fetchLogPage(p, fromDate, toDate).then(r => ({ items: r.items, totalPages: Math.ceil((r.totalCount || 1) / 100) })),
-    3,   // 3 concurrent requests — stay under rate limit
-    150, // 150ms pause between batches
+    3,   // 3 concurrent pages
+    150, // 150ms between batches
   );
-  logCacheStore.set(key, { data, expiresAt: Date.now() + 10 * 60 * 1000 }); // 10-min TTL
+  logCacheStore.set(key, { data, expiresAt: Date.now() + CACHE_TTL });
   return data;
 }
 
@@ -445,11 +465,9 @@ export async function GET(req: Request) {
       setterMap = getDemoData();
       isDemo = true;
     } else {
-      // Fetch appointments and status logs in parallel
-      const [appointments, statusLogs] = await Promise.all([
-        fetchAll(p => fetchApptPage(p, fromDate, toDate)),
-        fetchStatusLogs(fromDate, toDate),
-      ]);
+      // Fetch sequentially to avoid overwhelming RepCard's rate limit
+      const appointments = await fetchAppointments(fromDate, toDate);
+      const statusLogs = await fetchStatusLogs(fromDate, toDate);
 
       setterMap = buildSetterMap(appointments, statusLogs);
     }
