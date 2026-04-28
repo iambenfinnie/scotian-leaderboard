@@ -118,32 +118,31 @@ function cleanName(raw: string): string {
 
 // ── RepCard API fetch (paginated, YTD) ────────────────────────────────────────
 
+async function fetchPage(page: number): Promise<{ items: RepCardAppointment[]; totalPages: number }> {
+  const res = await fetch(`${BASE}/appointments?per_page=100&page=${page}`, {
+    headers: { 'x-api-key': API_KEY! },
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`RepCard API error: ${res.status} ${res.statusText}`);
+  const json = await res.json();
+  if (!json.status) throw new Error(json.message ?? 'RepCard API returned an error');
+  const result = json.result ?? {};
+  return { items: result.data ?? [], totalPages: result.totalPages ?? 1 };
+}
+
 async function fetchAppointments(): Promise<RepCardAppointment[]> {
-  const all: RepCardAppointment[] = [];
-  const fromDate = `${new Date().getFullYear()}-01-01`;
-  let page = 1;
+  // Fetch page 1 to learn total pages, then fetch the rest in parallel batches
+  const { items: firstItems, totalPages } = await fetchPage(1);
+  if (totalPages <= 1) return firstItems;
 
-  while (true) {
-    const url = `${BASE}/appointments?from_date=${fromDate}&per_page=100&page=${page}`;
-    const res = await fetch(url, {
-      headers: { 'x-api-key': API_KEY! },
-      cache: 'no-store',
-    });
+  const all = [...firstItems];
+  const BATCH = 10;
 
-    if (!res.ok) throw new Error(`RepCard API error: ${res.status} ${res.statusText}`);
-
-    const json = await res.json();
-    if (!json.status) throw new Error(json.message ?? 'RepCard API returned an error');
-
-    const result = json.result ?? {};
-    const items: RepCardAppointment[] = result.data ?? [];
-
-    if (!Array.isArray(items) || items.length === 0) break;
-    all.push(...items);
-
-    const totalPages: number = result.totalPages ?? 1;
-    if (page >= totalPages) break;
-    page++;
+  for (let start = 2; start <= totalPages; start += BATCH) {
+    const end = Math.min(start + BATCH - 1, totalPages);
+    const pages = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    const batches = await Promise.all(pages.map(p => fetchPage(p)));
+    for (const { items } of batches) all.push(...items);
   }
 
   return all;
