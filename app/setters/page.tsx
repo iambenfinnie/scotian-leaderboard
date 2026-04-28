@@ -11,6 +11,12 @@ interface PeriodCounts {
   pending: number;
 }
 
+interface DoorPeriod {
+  doors: number;
+  dms: number;
+  fieldMinutes: number;
+}
+
 interface SetterStats {
   rank: number;
   name: string;
@@ -20,14 +26,27 @@ interface SetterStats {
   cancel: number;
   pending: number;
   showRate: number;
+  doors: number;
+  dms: number;
+  closeRatio: number;
+  totalFieldMinutes: number;
+  workingDays: number;
+  avgStartMinute: number;
+  avgEndMinute: number;
+  avgStartFmt: string;
+  avgEndFmt: string;
   monthly: Record<string, PeriodCounts>;
   weekly: Record<string, PeriodCounts>;
+  monthlyDoor: Record<string, DoorPeriod>;
+  weeklyDoor: Record<string, DoorPeriod>;
 }
 
 interface ApiResponse {
   setters: SetterStats[];
   totalAppointments: number;
+  totalDoors: number;
   teamShowRate: number;
+  teamCloseRatio: number;
   months: { key: string; label: string }[];
   weeks: { key: string; label: string }[];
   year: number;
@@ -77,6 +96,20 @@ function getCurrentMonthKey() {
 
 function isWeekKey(key: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(key);
+}
+
+function fmtFieldTime(mins: number) {
+  if (!mins || mins <= 0) return '—';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m}m`;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function closeRatioStyle(rate: number) {
+  if (rate >= 0.15) return { bg: 'rgba(34,197,94,0.15)', color: '#22C55E' };
+  if (rate >= 0.08) return { bg: 'rgba(234,179,8,0.15)', color: '#EAB308' };
+  return { bg: 'rgba(239,68,68,0.1)', color: '#EF4444' };
 }
 
 function showRateStyle(rate: number) {
@@ -149,16 +182,19 @@ export default function SettersPage() {
     if (!data) return [];
     if (selectedPeriod === 'ytd') return data.setters;
 
-    const periodMap = isWeekKey(selectedPeriod) ? 'weekly' : 'monthly';
+    const isWeek = isWeekKey(selectedPeriod);
+    const periodMap = isWeek ? 'weekly' : 'monthly';
+    const doorMap = isWeek ? 'weeklyDoor' : 'monthlyDoor';
     return data.setters
       .map(s => {
         const p: PeriodCounts = s[periodMap][selectedPeriod] ?? {
-          sat: 0,
-          noshow: 0,
-          cancel: 0,
-          pending: 0,
+          sat: 0, noshow: 0, cancel: 0, pending: 0,
+        };
+        const dp: DoorPeriod = s[doorMap][selectedPeriod] ?? {
+          doors: 0, dms: 0, fieldMinutes: 0,
         };
         const showable = p.sat + p.noshow;
+        const closeRatio = dp.dms > 0 ? p.sat / dp.dms : 0;
         return {
           ...s,
           totalBooked: p.sat + p.noshow + p.cancel + p.pending,
@@ -167,9 +203,13 @@ export default function SettersPage() {
           cancel: p.cancel,
           pending: p.pending,
           showRate: showable > 0 ? p.sat / showable : 0,
+          doors: dp.doors,
+          dms: dp.dms,
+          closeRatio,
+          totalFieldMinutes: dp.fieldMinutes,
         };
       })
-      .filter(s => s.totalBooked > 0)
+      .filter(s => s.totalBooked > 0 || s.doors > 0)
       .sort((a, b) => b.totalBooked - a.totalBooked)
       .map((s, i) => ({ ...s, rank: i + 1 }));
   })();
@@ -311,16 +351,21 @@ export default function SettersPage() {
         {/* ── Summary cards ───────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <StatCard label={`Appointments Set (${periodLabel})`} value={String(periodTotal)} gold />
-          <StatCard label={`Shows (${periodLabel})`} value={String(periodSat)} />
+          <StatCard label={`Total Doors (${periodLabel})`} value={String(displaySetters.reduce((s, c) => s + c.doors, 0) || '—')} />
           <StatCard
             label={`Team Show Rate (${periodLabel})`}
             value={fmtPct(teamShowRate)}
             sub="shows ÷ (shows + no-shows)"
           />
           <StatCard
-            label={`${periodLabel} Top Setter`}
-            value={topSetter?.name ?? '—'}
-            sub={topSetter ? `${topSetter.totalBooked} appts · ${fmtPct(topSetter.showRate)} show` : undefined}
+            label={`Team Close Ratio (${periodLabel})`}
+            value={(() => {
+              const withDms = displaySetters.filter(s => s.dms > 0);
+              if (!withDms.length) return '—';
+              const avg = withDms.reduce((s, c) => s + c.closeRatio, 0) / withDms.length;
+              return fmtPct(avg);
+            })()}
+            sub="appts set ÷ DMs spoken to"
           />
         </div>
 
@@ -537,6 +582,12 @@ export default function SettersPage() {
                     <TH>Cancels</TH>
                     {displaySetters[0]?.pending > 0 && <TH>Pending</TH>}
                     <TH>Show Rate</TH>
+                    <TH>Doors</TH>
+                    <TH>DMs</TH>
+                    <TH>Close Ratio</TH>
+                    <TH>First Door</TH>
+                    <TH>Last Door</TH>
+                    <TH>Time in Field</TH>
                   </tr>
                 </thead>
                 <tbody>
@@ -645,6 +696,51 @@ export default function SettersPage() {
                             style={{ background: srStyle.bg, color: srStyle.color }}
                           >
                             {s.sat + s.noshow > 0 ? fmtPct(s.showRate) : '—'}
+                          </span>
+                        </TD>
+
+                        {/* Doors knocked */}
+                        <TD>
+                          <span className="font-semibold text-white">{s.doors || '—'}</span>
+                        </TD>
+
+                        {/* Decision makers */}
+                        <TD>
+                          <span style={{ color: 'var(--text-muted)' }}>{s.dms || '—'}</span>
+                        </TD>
+
+                        {/* Close ratio */}
+                        <TD>
+                          {s.dms > 0 ? (
+                            <span
+                              className="inline-block px-2 py-0.5 rounded text-xs font-semibold"
+                              style={{ background: closeRatioStyle(s.closeRatio).bg, color: closeRatioStyle(s.closeRatio).color }}
+                            >
+                              {fmtPct(s.closeRatio)}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>—</span>
+                          )}
+                        </TD>
+
+                        {/* First door / avg start */}
+                        <TD>
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                            {selectedPeriod === 'ytd' ? s.avgStartFmt : (s.doors > 0 ? s.avgStartFmt : '—')}
+                          </span>
+                        </TD>
+
+                        {/* Last door / avg end */}
+                        <TD>
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                            {selectedPeriod === 'ytd' ? s.avgEndFmt : (s.doors > 0 ? s.avgEndFmt : '—')}
+                          </span>
+                        </TD>
+
+                        {/* Time in field */}
+                        <TD>
+                          <span className="text-xs font-medium" style={{ color: '#60A5FA' }}>
+                            {fmtFieldTime(s.totalFieldMinutes)}
                           </span>
                         </TD>
                       </tr>
@@ -895,8 +991,9 @@ export default function SettersPage() {
               </p>
               <p className="text-2xl font-black text-white">{topSetter.name}</p>
               <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-                {topSetter.sat} shows · {topSetter.noshow} no-shows ·{' '}
-                {fmtPct(topSetter.showRate)} show rate
+                {topSetter.sat} shows · {fmtPct(topSetter.showRate)} show rate
+                {topSetter.dms > 0 && ` · ${fmtPct(topSetter.closeRatio)} close ratio`}
+                {topSetter.doors > 0 && ` · ${topSetter.doors} doors`}
               </p>
             </div>
             <div className="text-right">

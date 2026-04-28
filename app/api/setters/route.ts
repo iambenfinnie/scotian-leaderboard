@@ -9,20 +9,21 @@ const BASE = 'https://app.repcard.com/api';
 
 interface RepCardAppointment {
   id: number;
-  startAt: string; // "YYYY-MM-DD HH:MM:SS"
+  startAt: string;
   createdAt: string;
-  setter: {
-    id: number;
-    fullName: string;
-  } | null;
+  setter: { id: number; fullName: string } | null;
   status: {
     id: number;
     title: string;
-    category: {
-      id: number;
-      title: string; // "Held" | "Not Held"
-    };
+    category: { id: number; title: string };
   } | null;
+}
+
+interface StatusLog {
+  userId: number;
+  createdAt: string;
+  user: { id: number; firstName: string; lastName: string } | null;
+  statusTo: { statusName: string } | null;
 }
 
 type NormStatus = 'sat' | 'noshow' | 'cancel' | 'pending';
@@ -34,39 +35,39 @@ interface PeriodCounts {
   pending: number;
 }
 
+interface DoorPeriod {
+  doors: number;
+  dms: number;
+  fieldMinutes: number;
+}
+
 interface SetterAccum {
+  userId: number;
   name: string;
+  // Appointment stats
   sat: number;
   noshow: number;
   cancel: number;
   pending: number;
   monthly: Record<string, PeriodCounts>;
   weekly: Record<string, PeriodCounts>;
+  // Door knock stats
+  doors: number;
+  dms: number;
+  dayStats: Record<string, { start: number; end: number }>; // date → {start,end} minutes since midnight (Halifax)
+  monthlyDoor: Record<string, DoorPeriod>;
+  weeklyDoor: Record<string, DoorPeriod>;
 }
 
 // ── Status classification ─────────────────────────────────────────────────────
-// Based on Scotian Heat Pumps' actual RepCard outcome setup:
-//   Held category   → appointment was sat
-//   "APT SAT BUT NOT SOLD" / "SAT NOT CLOSED" → sat despite being in Not Held
-//   "NO SHOW" / "Not Interested" (Not Held) → no-show
-//   "Rescheduled"   → cancelled/rescheduled (excluded from show rate)
-//   null status     → upcoming/pending
 
 function classifyStatus(appt: RepCardAppointment): NormStatus {
   if (!appt.status) return 'pending';
-
   const title = appt.status.title.toUpperCase();
   const category = appt.status.category?.title;
-
-  // Appointments that sat even though they're in "Not Held" category
   if (title.includes('SAT')) return 'sat';
-
   if (category === 'Held') return 'sat';
-
-  // Explicit rescheduled → treat as cancel (excluded from show rate calc)
   if (title.includes('RESCHEDUL')) return 'cancel';
-
-  // Everything else in "Not Held" is a no-show (NO SHOW, Not Interested at door, etc.)
   return 'noshow';
 }
 
@@ -74,9 +75,15 @@ function classifyStatus(appt: RepCardAppointment): NormStatus {
 
 function parseRepCardDate(s: string): Date | null {
   if (!s) return null;
-  // "2025-04-07 22:00:00" → replace space with T for standard parsing
   const d = new Date(s.replace(' ', 'T'));
   return isNaN(d.getTime()) ? null : d;
+}
+
+function toHalifax(utcStr: string): Date {
+  const d = new Date(utcStr);
+  // Convert UTC timestamp to Halifax local time
+  const local = new Date(d.toLocaleString('en-US', { timeZone: 'America/Halifax' }));
+  return local;
 }
 
 function monthKey(d: Date) {
@@ -111,45 +118,75 @@ function emptyPeriod(): PeriodCounts {
   return { sat: 0, noshow: 0, cancel: 0, pending: 0 };
 }
 
+function emptyDoorPeriod(): DoorPeriod {
+  return { doors: 0, dms: 0, fieldMinutes: 0 };
+}
+
 function cleanName(raw: string): string {
-  // Strip the ❌ prefix RepCard adds to deactivated users
   return raw.replace(/^[^\w\s]*\s*/, '').trim();
 }
 
-// ── RepCard API fetch (paginated, per year) ───────────────────────────────────
+function formatMinutes(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const hour = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${hour}:${String(m).padStart(2, '0')} ${suffix}`;
+}
 
-async function fetchPage(
+// ── API fetchers ──────────────────────────────────────────────────────────────
+
+async function fetchApptPage(
   page: number,
   fromDate: string,
   toDate: string,
 ): Promise<{ items: RepCardAppointment[]; totalPages: number }> {
-  const url = `${BASE}/appointments?from_date=${fromDate}&to_date=${toDate}&per_page=100&page=${page}`;
-  const res = await fetch(url, {
-    headers: { 'x-api-key': API_KEY! },
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new Error(`RepCard API error: ${res.status} ${res.statusText}`);
+  const res = await fetch(
+    `${BASE}/appointments?from_date=${fromDate}&to_date=${toDate}&per_page=100&page=${page}`,
+    { headers: { 'x-api-key': API_KEY! }, cache: 'no-store' },
+  );
+  if (!res.ok) throw new Error(`Appointments API error: ${res.status}`);
   const json = await res.json();
-  if (!json.status) throw new Error(json.message ?? 'RepCard API returned an error');
+  if (!json.status) throw new Error(json.message ?? 'RepCard error');
   const result = json.result ?? {};
   return { items: result.data ?? [], totalPages: result.totalPages ?? 1 };
 }
 
-async function fetchAppointments(year: number): Promise<RepCardAppointment[]> {
-  const fromDate = `${year}-01-01`;
-  const toDate = `${year}-12-31`;
+async function fetchLogPage(
+  page: number,
+  fromDate: string,
+  toDate: string,
+): Promise<{ items: StatusLog[]; totalCount: number }> {
+  const res = await fetch(
+    `${BASE}/customers/status-logs?from_date=${fromDate}&to_date=${toDate}&per_page=100&page=${page}`,
+    { headers: { 'x-api-key': API_KEY! }, cache: 'no-store' },
+  );
+  if (!res.ok) throw new Error(`Status logs API error: ${res.status}`);
+  const json = await res.json();
+  const result = json.result ?? json;
+  return {
+    items: result.data ?? [],
+    totalCount: result.totalCount ?? 0,
+  };
+}
 
-  const { items: firstItems, totalPages } = await fetchPage(1, fromDate, toDate);
-  if (totalPages <= 1) return firstItems;
+async function fetchAll<T>(
+  fetchFn: (page: number) => Promise<{ items: T[]; totalPages?: number; totalCount?: number }>,
+): Promise<T[]> {
+  const first = await fetchFn(1);
+  const totalPages =
+    first.totalPages ?? (first.totalCount ? Math.ceil(first.totalCount / 100) : 1);
 
-  const all = [...firstItems];
+  if (totalPages <= 1) return first.items;
+
+  const all = [...first.items];
   const BATCH = 10;
 
   for (let start = 2; start <= totalPages; start += BATCH) {
     const end = Math.min(start + BATCH - 1, totalPages);
     const pages = Array.from({ length: end - start + 1 }, (_, i) => start + i);
-    const batches = await Promise.all(pages.map(p => fetchPage(p, fromDate, toDate)));
-    for (const { items } of batches) all.push(...items);
+    const results = await Promise.all(pages.map(p => fetchFn(p)));
+    for (const r of results) all.push(...r.items);
   }
 
   return all;
@@ -157,30 +194,36 @@ async function fetchAppointments(year: number): Promise<RepCardAppointment[]> {
 
 // ── Data processing ───────────────────────────────────────────────────────────
 
-function processAppointments(appointments: RepCardAppointment[]) {
-  const setters = new Map<string, SetterAccum>();
+function buildSetterMap(
+  appointments: RepCardAppointment[],
+  statusLogs: StatusLog[],
+): Map<number, SetterAccum> {
+  const setters = new Map<number, SetterAccum>();
 
+  // Helper to get or create a setter entry
+  function getSetter(userId: number, name: string): SetterAccum {
+    if (!setters.has(userId)) {
+      setters.set(userId, {
+        userId,
+        name,
+        sat: 0, noshow: 0, cancel: 0, pending: 0,
+        monthly: {}, weekly: {},
+        doors: 0, dms: 0,
+        dayStats: {},
+        monthlyDoor: {}, weeklyDoor: {},
+      });
+    }
+    return setters.get(userId)!;
+  }
+
+  // Process appointments
   for (const appt of appointments) {
     if (!appt.setter) continue;
-
     const name = cleanName(appt.setter.fullName);
     if (!name) continue;
 
+    const s = getSetter(appt.setter.id, name);
     const norm = classifyStatus(appt);
-
-    if (!setters.has(name)) {
-      setters.set(name, {
-        name,
-        sat: 0,
-        noshow: 0,
-        cancel: 0,
-        pending: 0,
-        monthly: {},
-        weekly: {},
-      });
-    }
-
-    const s = setters.get(name)!;
     s[norm]++;
 
     const d = parseRepCardDate(appt.startAt);
@@ -194,28 +237,77 @@ function processAppointments(appointments: RepCardAppointment[]) {
     }
   }
 
+  // Process status logs (door knocks)
+  for (const log of statusLogs) {
+    if (!log.user) continue;
+    const rawName = `${log.user.firstName ?? ''} ${log.user.lastName ?? ''}`.trim();
+    const name = cleanName(rawName);
+    if (!name) continue;
+
+    const s = getSetter(log.userId, name);
+    const isNotHome = log.statusTo?.statusName === 'Not Home';
+
+    s.doors++;
+    if (!isNotHome) s.dms++;
+
+    // Convert to Halifax local time for accurate time-of-day calculations
+    const local = toHalifax(log.createdAt);
+    const minuteOfDay = local.getHours() * 60 + local.getMinutes();
+    const dateKey = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`;
+
+    // Track first/last knock per calendar day
+    if (!s.dayStats[dateKey]) {
+      s.dayStats[dateKey] = { start: minuteOfDay, end: minuteOfDay };
+    } else {
+      s.dayStats[dateKey].start = Math.min(s.dayStats[dateKey].start, minuteOfDay);
+      s.dayStats[dateKey].end = Math.max(s.dayStats[dateKey].end, minuteOfDay);
+    }
+
+    // Monthly/weekly door counts
+    const mk = monthKey(local);
+    const wk = weekKey(local);
+    if (!s.monthlyDoor[mk]) s.monthlyDoor[mk] = emptyDoorPeriod();
+    if (!s.weeklyDoor[wk]) s.weeklyDoor[wk] = emptyDoorPeriod();
+    s.monthlyDoor[mk].doors++;
+    s.weeklyDoor[wk].doors++;
+    if (!isNotHome) {
+      s.monthlyDoor[mk].dms++;
+      s.weeklyDoor[wk].dms++;
+    }
+  }
+
+  // Aggregate per-day field minutes into monthly/weekly buckets
+  for (const s of setters.values()) {
+    for (const [dateKey, { start, end }] of Object.entries(s.dayStats)) {
+      const fieldMins = Math.max(0, end - start);
+      const d = new Date(dateKey + 'T12:00:00');
+      const mk = monthKey(d);
+      const wk = weekKey(d);
+      if (s.monthlyDoor[mk]) s.monthlyDoor[mk].fieldMinutes += fieldMins;
+      if (s.weeklyDoor[wk]) s.weeklyDoor[wk].fieldMinutes += fieldMins;
+    }
+  }
+
   return setters;
 }
 
-// ── Demo data (shown when REPCARD_API_KEY is not configured) ──────────────────
+// ── Demo data ─────────────────────────────────────────────────────────────────
 
-function getDemoData(): Map<string, SetterAccum> {
+function getDemoData(): Map<number, SetterAccum> {
   const raw = [
-    { name: 'Olivia Clarke', sat: 38, noshow: 12, cancel: 8, pending: 5 },
-    { name: 'Tyler Marsh', sat: 31, noshow: 15, cancel: 10, pending: 3 },
-    { name: 'Jordan Lee', sat: 27, noshow: 9, cancel: 6, pending: 7 },
-    { name: 'Priya Kapoor', sat: 24, noshow: 18, cancel: 11, pending: 2 },
-    { name: 'Marcus Webb', sat: 19, noshow: 11, cancel: 7, pending: 4 },
+    { id: 1, name: 'Olivia Clarke', sat: 38, noshow: 12, cancel: 8, pending: 5, doors: 520, dms: 210 },
+    { id: 2, name: 'Tyler Marsh', sat: 31, noshow: 15, cancel: 10, pending: 3, doors: 480, dms: 175 },
+    { id: 3, name: 'Jordan Lee', sat: 27, noshow: 9, cancel: 6, pending: 7, doors: 390, dms: 145 },
+    { id: 4, name: 'Priya Kapoor', sat: 24, noshow: 18, cancel: 11, pending: 2, doors: 440, dms: 160 },
+    { id: 5, name: 'Marcus Webb', sat: 19, noshow: 11, cancel: 7, pending: 4, doors: 310, dms: 120 },
   ];
 
   const now = new Date();
-
   const months: string[] = [];
   for (let i = 0; i < 4; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
   }
-
   const weeks: string[] = [];
   for (let i = 0; i < 8; i++) {
     const d = new Date(now);
@@ -226,38 +318,83 @@ function getDemoData(): Map<string, SetterAccum> {
     weeks.push(monday.toISOString().slice(0, 10));
   }
 
-  const setters = new Map<string, SetterAccum>();
-  const monthFracs = [0.35, 0.3, 0.22, 0.13];
-  const weekFracs = [0.2, 0.18, 0.16, 0.14, 0.12, 0.08, 0.07, 0.05];
+  const setters = new Map<number, SetterAccum>();
+  const mf = [0.35, 0.3, 0.22, 0.13];
+  const wf = [0.2, 0.18, 0.16, 0.14, 0.12, 0.08, 0.07, 0.05];
 
   for (const sd of raw) {
     const monthly: SetterAccum['monthly'] = {};
     const weekly: SetterAccum['weekly'] = {};
+    const monthlyDoor: SetterAccum['monthlyDoor'] = {};
+    const weeklyDoor: SetterAccum['weeklyDoor'] = {};
 
     for (let i = 0; i < months.length; i++) {
-      const f = monthFracs[i];
-      monthly[months[i]] = {
-        sat: Math.round(sd.sat * f),
-        noshow: Math.round(sd.noshow * f),
-        cancel: Math.round(sd.cancel * f),
-        pending: i === 0 ? sd.pending : 0,
-      };
+      const f = mf[i];
+      monthly[months[i]] = { sat: Math.round(sd.sat * f), noshow: Math.round(sd.noshow * f), cancel: Math.round(sd.cancel * f), pending: i === 0 ? sd.pending : 0 };
+      monthlyDoor[months[i]] = { doors: Math.round(sd.doors * f), dms: Math.round(sd.dms * f), fieldMinutes: Math.round(1800 * f) };
     }
-
     for (let i = 0; i < weeks.length; i++) {
-      const f = weekFracs[i];
-      weekly[weeks[i]] = {
-        sat: Math.round(sd.sat * f),
-        noshow: Math.round(sd.noshow * f),
-        cancel: Math.round(sd.cancel * f),
-        pending: i === 0 ? sd.pending : 0,
-      };
+      const f = wf[i];
+      weekly[weeks[i]] = { sat: Math.round(sd.sat * f), noshow: Math.round(sd.noshow * f), cancel: Math.round(sd.cancel * f), pending: i === 0 ? sd.pending : 0 };
+      weeklyDoor[weeks[i]] = { doors: Math.round(sd.doors * f), dms: Math.round(sd.dms * f), fieldMinutes: Math.round(1800 * f) };
     }
 
-    setters.set(sd.name, { ...sd, monthly, weekly });
+    // Fake day stats: 8:30 AM start, 6:30 PM end, 20 working days
+    const dayStats: SetterAccum['dayStats'] = {};
+    for (let i = 0; i < 20; i++) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dk = d.toISOString().slice(0, 10);
+      dayStats[dk] = { start: 510 + Math.floor(Math.random() * 30), end: 1080 + Math.floor(Math.random() * 60) };
+    }
+
+    setters.set(sd.id, { userId: sd.id, name: sd.name, sat: sd.sat, noshow: sd.noshow, cancel: sd.cancel, pending: sd.pending, monthly, weekly, doors: sd.doors, dms: sd.dms, dayStats, monthlyDoor, weeklyDoor });
   }
 
   return setters;
+}
+
+// ── Compute summary stats from a SetterAccum ──────────────────────────────────
+
+function summarize(s: SetterAccum) {
+  const totalBooked = s.sat + s.noshow + s.cancel + s.pending;
+  const showable = s.sat + s.noshow;
+  const showRate = showable > 0 ? s.sat / showable : 0;
+  const closeRatio = s.dms > 0 ? s.sat / s.dms : 0;
+
+  // Compute total field minutes and avg start/end from dayStats
+  const days = Object.values(s.dayStats);
+  const workingDays = days.length;
+  const totalFieldMinutes = days.reduce((sum, d) => sum + Math.max(0, d.end - d.start), 0);
+  const avgStartMinute = workingDays > 0
+    ? Math.round(days.reduce((sum, d) => sum + d.start, 0) / workingDays)
+    : 0;
+  const avgEndMinute = workingDays > 0
+    ? Math.round(days.reduce((sum, d) => sum + d.end, 0) / workingDays)
+    : 0;
+
+  return {
+    name: s.name,
+    totalBooked,
+    sat: s.sat,
+    noshow: s.noshow,
+    cancel: s.cancel,
+    pending: s.pending,
+    showRate,
+    doors: s.doors,
+    dms: s.dms,
+    closeRatio,
+    totalFieldMinutes,
+    workingDays,
+    avgStartMinute,
+    avgEndMinute,
+    avgStartFmt: workingDays > 0 ? formatMinutes(avgStartMinute) : '—',
+    avgEndFmt: workingDays > 0 ? formatMinutes(avgEndMinute) : '—',
+    monthly: s.monthly,
+    weekly: s.weekly,
+    monthlyDoor: s.monthlyDoor,
+    weeklyDoor: s.weeklyDoor,
+  };
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
@@ -266,36 +403,29 @@ export async function GET(req: Request) {
   const currentYear = new Date().getFullYear();
   const { searchParams } = new URL(req.url);
   const year = parseInt(searchParams.get('year') ?? String(currentYear));
+  const fromDate = `${year}-01-01`;
+  const toDate = `${year}-12-31`;
 
   try {
-    let setterMap: Map<string, SetterAccum>;
+    let setterMap: Map<number, SetterAccum>;
     let isDemo = false;
 
     if (!API_KEY) {
       setterMap = getDemoData();
       isDemo = true;
     } else {
-      const appointments = await fetchAppointments(year);
-      setterMap = processAppointments(appointments);
+      // Fetch appointments and status logs in parallel
+      const [appointments, statusLogs] = await Promise.all([
+        fetchAll(p => fetchApptPage(p, fromDate, toDate)),
+        fetchAll(p => fetchLogPage(p, fromDate, toDate).then(r => ({ items: r.items, totalPages: Math.ceil(r.totalCount / 100) }))),
+      ]);
+
+      setterMap = buildSetterMap(appointments, statusLogs);
     }
 
     const setters = Array.from(setterMap.values())
-      .map(s => {
-        const showable = s.sat + s.noshow;
-        const totalBooked = s.sat + s.noshow + s.cancel + s.pending;
-        const showRate = showable > 0 ? s.sat / showable : 0;
-        return {
-          name: s.name,
-          totalBooked,
-          sat: s.sat,
-          noshow: s.noshow,
-          cancel: s.cancel,
-          pending: s.pending,
-          showRate,
-          monthly: s.monthly,
-          weekly: s.weekly,
-        };
-      })
+      .map(summarize)
+      .filter(s => s.totalBooked > 0 || s.doors > 0)
       .sort((a, b) => b.totalBooked - a.totalBooked)
       .map((s, i) => ({ ...s, rank: i + 1 }));
 
@@ -306,31 +436,26 @@ export async function GET(req: Request) {
       Object.keys(s.weekly).forEach(k => allWeeks.add(k));
     }
 
-    const months = Array.from(allMonths)
-      .sort()
-      .reverse()
-      .map(k => ({ key: k, label: monthLabel(k) }));
-
-    const weeks = Array.from(allWeeks)
-      .sort()
-      .reverse()
-      .slice(0, 8)
-      .map(k => ({ key: k, label: weekLabel(k) }));
+    const months = Array.from(allMonths).sort().reverse().map(k => ({ key: k, label: monthLabel(k) }));
+    const weeks = Array.from(allWeeks).sort().reverse().slice(0, 8).map(k => ({ key: k, label: weekLabel(k) }));
 
     const ratedSetters = setters.filter(s => s.sat + s.noshow > 0);
-    const teamShowRate =
-      ratedSetters.length > 0
-        ? ratedSetters.reduce((s, c) => s + c.showRate, 0) / ratedSetters.length
-        : 0;
+    const teamShowRate = ratedSetters.length > 0
+      ? ratedSetters.reduce((s, c) => s + c.showRate, 0) / ratedSetters.length
+      : 0;
+    const teamCloseRatio = setters.filter(s => s.dms > 0).length > 0
+      ? setters.filter(s => s.dms > 0).reduce((s, c) => s + c.closeRatio, 0) / setters.filter(s => s.dms > 0).length
+      : 0;
 
-    // Available years: from 2025 up to current year
     const availableYears: number[] = [];
     for (let y = currentYear; y >= 2025; y--) availableYears.push(y);
 
     return NextResponse.json({
       setters,
       totalAppointments: setters.reduce((s, c) => s + c.totalBooked, 0),
+      totalDoors: setters.reduce((s, c) => s + c.doors, 0),
       teamShowRate,
+      teamCloseRatio,
       months,
       weeks,
       year,
