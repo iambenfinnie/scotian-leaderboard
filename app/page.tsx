@@ -57,6 +57,11 @@ function getCurrentWeekKey(): string {
   return monday.toISOString().slice(0, 10);
 }
 
+function getCurrentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function isWeekKey(key: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(key);
 }
@@ -128,6 +133,7 @@ export default function LeaderboardPage() {
   }, [fetchData]);
 
   const currentWeekKey = getCurrentWeekKey();
+  const currentMonthKey = getCurrentMonthKey();
 
   // ── Compute display data based on selected tab ───────────────────────────
   const displayData: CloserStats[] = (() => {
@@ -153,6 +159,7 @@ export default function LeaderboardPage() {
       if (selectedMonth === currentWeekKey) return 'This Week';
       return data?.weeks.find(w => w.key === selectedMonth)?.label ?? selectedMonth;
     }
+    if (selectedMonth === currentMonthKey) return 'This Month';
     return data?.months.find(m => m.key === selectedMonth)?.label ?? selectedMonth;
   })();
 
@@ -261,7 +268,7 @@ export default function LeaderboardPage() {
           <StatCard label={`Deals Closed (${periodLabel})`} value={String(periodDeals)} />
           {selectedMonth === 'ytd' ? (
             <StatCard
-              label={data?.months[0] ? `${data.months[0].label} Revenue` : 'This Month'}
+              label="This Month Revenue"
               value={fmt$(currentMonthRevenue)}
             />
           ) : (
@@ -288,7 +295,7 @@ export default function LeaderboardPage() {
           </Tab>
           {data?.months.map(m => (
             <Tab key={m.key} active={selectedMonth === m.key} onClick={() => setSelectedMonth(m.key)}>
-              {m.label}
+              {m.key === currentMonthKey ? '📆 This Month' : m.label}
             </Tab>
           ))}
         </div>
