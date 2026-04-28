@@ -129,6 +129,15 @@ export default function LeaderboardPage() {
 
   const maxRevenue = Math.max(...displayData.map(c => c.revenue), 1);
 
+  const periodLabel =
+    selectedMonth === 'ytd'
+      ? 'YTD'
+      : (data?.months.find(m => m.key === selectedMonth)?.label ?? selectedMonth);
+
+  const periodRevenue = displayData.reduce((s, c) => s + c.revenue, 0);
+  const periodDeals = displayData.reduce((s, c) => s + c.deals, 0);
+
+  // Current month (most recent) for the YTD "this month" card
   const currentMonthRevenue = data?.months[0]
     ? data.leaderboard.reduce((s, c) => s + (c.monthly[data.months[0].key]?.revenue ?? 0), 0)
     : 0;
@@ -226,14 +235,22 @@ export default function LeaderboardPage() {
 
         {/* ── Summary cards ───────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <StatCard label="Total Revenue (YTD)" value={fmt$(data?.totalRevenue ?? 0)} gold />
-          <StatCard label="Deals Closed (YTD)" value={String(data?.totalDeals ?? 0)} />
+          <StatCard label={`Total Revenue (${periodLabel})`} value={fmt$(periodRevenue)} gold />
+          <StatCard label={`Deals Closed (${periodLabel})`} value={String(periodDeals)} />
+          {selectedMonth === 'ytd' ? (
+            <StatCard
+              label={data?.months[0] ? `${data.months[0].label} Revenue` : 'This Month'}
+              value={fmt$(currentMonthRevenue)}
+            />
+          ) : (
+            <StatCard
+              label={`${periodLabel} — Top Closer`}
+              value={displayData[0]?.name ?? '—'}
+              sub={displayData[0] ? fmt$(displayData[0].revenue) : undefined}
+            />
+          )}
           <StatCard
-            label={data?.months[0] ? `${data.months[0].label} Revenue` : 'This Month'}
-            value={fmt$(currentMonthRevenue)}
-          />
-          <StatCard
-            label="Team Avg Close Rate"
+            label={selectedMonth === 'ytd' ? 'Team Avg Close Rate' : 'Team Avg Close Rate (YTD)'}
             value={fmtPct(avgCloseRate)}
             sub="per sit"
           />
