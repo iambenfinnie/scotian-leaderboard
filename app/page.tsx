@@ -48,6 +48,19 @@ function fmtPct(r: number): string {
   return `${(r * 100).toFixed(1)}%`;
 }
 
+// Returns the YYYY-MM-DD of the Monday that starts the current week
+function getCurrentWeekKey(): string {
+  const now = new Date();
+  const day = now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+  return monday.toISOString().slice(0, 10);
+}
+
+function isWeekKey(key: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(key);
+}
+
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-CA', {
     hour: '2-digit',
@@ -114,15 +127,18 @@ export default function LeaderboardPage() {
     return () => clearInterval(timer);
   }, [fetchData]);
 
+  const currentWeekKey = getCurrentWeekKey();
+
   // ── Compute display data based on selected tab ───────────────────────────
   const displayData: CloserStats[] = (() => {
     if (!data) return [];
     if (selectedMonth === 'ytd') return data.leaderboard;
+    const periodMap = isWeekKey(selectedMonth) ? 'weekly' : 'monthly';
     return data.leaderboard
       .map(c => ({
         ...c,
-        revenue: c.monthly[selectedMonth]?.revenue ?? 0,
-        deals: c.monthly[selectedMonth]?.deals ?? 0,
+        revenue: c[periodMap][selectedMonth]?.revenue ?? 0,
+        deals: c[periodMap][selectedMonth]?.deals ?? 0,
       }))
       .filter(c => c.revenue > 0)
       .sort((a, b) => b.revenue - a.revenue)
@@ -131,10 +147,14 @@ export default function LeaderboardPage() {
 
   const maxRevenue = Math.max(...displayData.map(c => c.revenue), 1);
 
-  const periodLabel =
-    selectedMonth === 'ytd'
-      ? 'YTD'
-      : (data?.months.find(m => m.key === selectedMonth)?.label ?? selectedMonth);
+  const periodLabel = (() => {
+    if (selectedMonth === 'ytd') return 'YTD';
+    if (isWeekKey(selectedMonth)) {
+      if (selectedMonth === currentWeekKey) return 'This Week';
+      return data?.weeks.find(w => w.key === selectedMonth)?.label ?? selectedMonth;
+    }
+    return data?.months.find(m => m.key === selectedMonth)?.label ?? selectedMonth;
+  })();
 
   const periodRevenue = displayData.reduce((s, c) => s + c.revenue, 0);
   const periodDeals = displayData.reduce((s, c) => s + c.deals, 0);
@@ -485,8 +505,8 @@ export default function LeaderboardPage() {
           </section>
         )}
 
-        {/* ── Weekly breakdown (YTD view only) ────────────────────────────── */}
-        {selectedMonth === 'ytd' && data && data.weeks.length > 0 && (
+        {/* ── Weekly breakdown ─────────────────────────────────────────────── */}
+        {(selectedMonth === 'ytd' || isWeekKey(selectedMonth)) && data && data.weeks.length > 0 && (
           <section>
             <h2 className="font-bold text-sm uppercase tracking-widest mb-4" style={{ color: 'var(--gold)' }}>
               Weekly Breakdown
@@ -506,18 +526,41 @@ export default function LeaderboardPage() {
                 const weekMax = entries[0].revenue;
                 const weekTotal = entries.reduce((s, c) => s + c.revenue, 0);
                 const weekDeals = entries.reduce((s, c) => s + c.deals, 0);
+                const isCurrentWeek = week.key === currentWeekKey;
+                const isSelected = selectedMonth === week.key;
 
                 return (
-                  <div
+                  <button
                     key={week.key}
-                    className="rounded-xl p-4"
-                    style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+                    onClick={() => setSelectedMonth(isSelected ? 'ytd' : week.key)}
+                    className="rounded-xl p-4 text-left w-full transition-all"
+                    style={{
+                      background: isSelected ? 'rgba(201,168,76,0.08)' : 'var(--bg-card)',
+                      border: isSelected
+                        ? '1px solid var(--gold)'
+                        : '1px solid var(--border)',
+                      cursor: 'pointer',
+                    }}
                   >
-                    <div className="flex items-start justify-between mb-1">
-                      <h3 className="font-bold text-xs uppercase tracking-wider leading-tight" style={{ color: 'var(--text-muted)' }}>
+                    {/* Week label + badges */}
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      {isCurrentWeek && (
+                        <span
+                          className="text-xs font-bold px-1.5 py-0.5 rounded"
+                          style={{ background: 'var(--gold)', color: '#000' }}
+                        >
+                          This Week
+                        </span>
+                      )}
+                      <h3
+                        className="font-bold text-xs uppercase tracking-wider leading-tight"
+                        style={{ color: isSelected ? 'var(--gold)' : 'var(--text-muted)' }}
+                      >
                         {week.label}
                       </h3>
                     </div>
+
+                    {/* Week totals */}
                     <div className="flex items-baseline gap-2 mb-3">
                       <span className="text-base font-black" style={{ color: 'var(--gold)' }}>
                         {fmt$(weekTotal)}
@@ -526,22 +569,24 @@ export default function LeaderboardPage() {
                         {weekDeals} deal{weekDeals !== 1 ? 's' : ''}
                       </span>
                     </div>
+
+                    {/* Per-closer bars */}
                     <div className="space-y-2.5">
                       {entries.map((e, i) => (
                         <div key={e.name}>
                           <div className="flex items-center justify-between text-xs mb-1">
                             <span className="flex items-center gap-1 text-white font-medium truncate">
-                              {i < 3 && <span className="text-xs">{MEDALS[i]}</span>}
+                              {i < 3 && <span>{MEDALS[i]}</span>}
                               <span className="truncate">{e.name.split(' ')[0]}</span>
                             </span>
-                            <span style={{ color: i === 0 ? 'var(--gold)' : 'var(--text-muted)' }} className="shrink-0 ml-1">
+                            <span
+                              style={{ color: i === 0 ? 'var(--gold)' : 'var(--text-muted)' }}
+                              className="shrink-0 ml-1"
+                            >
                               {fmt$(e.revenue)}
                             </span>
                           </div>
-                          <div
-                            className="h-1 rounded-full overflow-hidden"
-                            style={{ background: 'var(--bg-secondary)' }}
-                          >
+                          <div className="h-1 rounded-full overflow-hidden" style={{ background: 'var(--bg-secondary)' }}>
                             <div
                               className="h-full rounded-full"
                               style={{
@@ -555,7 +600,13 @@ export default function LeaderboardPage() {
                         </div>
                       ))}
                     </div>
-                  </div>
+
+                    {isSelected && (
+                      <p className="text-xs mt-3 text-center" style={{ color: 'var(--text-muted)' }}>
+                        Click to deselect
+                      </p>
+                    )}
+                  </button>
                 );
               })}
             </div>
