@@ -285,7 +285,7 @@ export async function GET() {
 
     return NextResponse.json({
       setters,
-      totalAppointments: setters.reduce((s, c) => s + s.totalBooked, 0),
+      totalAppointments: setters.reduce((s, c) => s + c.totalBooked, 0),
       teamShowRate,
       months,
       weeks,
