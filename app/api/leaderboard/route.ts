@@ -54,6 +54,23 @@ function monthLabel(key: string): string {
   });
 }
 
+// Returns the ISO date string of the Monday that starts the week containing d
+function weekKey(d: Date): string {
+  const day = d.getDay(); // 0=Sun
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+  return monday.toISOString().slice(0, 10);
+}
+
+function weekLabel(key: string): string {
+  const monday = new Date(key + 'T00:00:00');
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const fmt = (dt: Date) =>
+    dt.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+  return `${fmt(monday)} – ${fmt(sunday)}`;
+}
+
 interface CloserAccum {
   name: string;
   leads: number;
@@ -62,6 +79,7 @@ interface CloserAccum {
   revenue: number;
   seenLeadIds: Set<string>;
   monthly: Record<string, { revenue: number; deals: number }>;
+  weekly: Record<string, { revenue: number; deals: number }>;
 }
 
 export async function GET() {
@@ -110,6 +128,7 @@ export async function GET() {
           revenue: 0,
           seenLeadIds: new Set(),
           monthly: {},
+          weekly: {},
         });
       }
 
@@ -126,6 +145,11 @@ export async function GET() {
           if (!c.monthly[mk]) c.monthly[mk] = { revenue: 0, deals: 0 };
           c.monthly[mk].revenue += dealValue;
           c.monthly[mk].deals++;
+
+          const wk = weekKey(soldDate);
+          if (!c.weekly[wk]) c.weekly[wk] = { revenue: 0, deals: 0 };
+          c.weekly[wk].revenue += dealValue;
+          c.weekly[wk].deals++;
         }
       }
     }
@@ -143,6 +167,7 @@ export async function GET() {
         closeRatePerSit: c.sits > 0 ? c.deals / c.sits : 0,
         revenuePerSit: c.sits > 0 ? c.revenue / c.sits : 0,
         monthly: c.monthly,
+        weekly: c.weekly,
       }));
 
     // Collect all months that have data
@@ -155,11 +180,23 @@ export async function GET() {
       .reverse()
       .map(mk => ({ key: mk, label: monthLabel(mk) }));
 
+    // Collect all weeks that have data, most recent 8
+    const allWeeks = new Set<string>();
+    for (const c of leaderboard) {
+      for (const wk of Object.keys(c.weekly)) allWeeks.add(wk);
+    }
+    const sortedWeeks = Array.from(allWeeks)
+      .sort()
+      .reverse()
+      .slice(0, 8)
+      .map(wk => ({ key: wk, label: weekLabel(wk) }));
+
     return NextResponse.json({
       leaderboard,
       totalRevenue: leaderboard.reduce((s, c) => s + c.revenue, 0),
       totalDeals: leaderboard.reduce((s, c) => s + c.deals, 0),
       months: sortedMonths,
+      weeks: sortedWeeks,
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {

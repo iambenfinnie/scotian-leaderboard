@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-interface MonthStats {
+interface PeriodStats {
   revenue: number;
   deals: number;
 }
@@ -17,7 +17,8 @@ interface CloserStats {
   closeRatePerLead: number;
   closeRatePerSit: number;
   revenuePerSit: number;
-  monthly: Record<string, MonthStats>;
+  monthly: Record<string, PeriodStats>;
+  weekly: Record<string, PeriodStats>;
 }
 
 interface ApiResponse {
@@ -25,6 +26,7 @@ interface ApiResponse {
   totalRevenue: number;
   totalDeals: number;
   months: { key: string; label: string }[];
+  weeks: { key: string; label: string }[];
   updatedAt: string;
   error?: string;
 }
@@ -467,6 +469,83 @@ export default function LeaderboardPage() {
                               className="h-full rounded-full"
                               style={{
                                 width: `${(e.revenue / monthMax) * 100}%`,
+                                background: i === 0
+                                  ? 'linear-gradient(90deg, #C9A84C, #F5D060)'
+                                  : 'var(--blue-accent)',
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* ── Weekly breakdown (YTD view only) ────────────────────────────── */}
+        {selectedMonth === 'ytd' && data && data.weeks.length > 0 && (
+          <section>
+            <h2 className="font-bold text-sm uppercase tracking-widest mb-4" style={{ color: 'var(--gold)' }}>
+              Weekly Breakdown
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {data.weeks.map(week => {
+                const entries = data.leaderboard
+                  .map(c => ({
+                    name: c.name,
+                    revenue: c.weekly[week.key]?.revenue ?? 0,
+                    deals: c.weekly[week.key]?.deals ?? 0,
+                  }))
+                  .filter(c => c.revenue > 0)
+                  .sort((a, b) => b.revenue - a.revenue);
+
+                if (entries.length === 0) return null;
+                const weekMax = entries[0].revenue;
+                const weekTotal = entries.reduce((s, c) => s + c.revenue, 0);
+                const weekDeals = entries.reduce((s, c) => s + c.deals, 0);
+
+                return (
+                  <div
+                    key={week.key}
+                    className="rounded-xl p-4"
+                    style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+                  >
+                    <div className="flex items-start justify-between mb-1">
+                      <h3 className="font-bold text-xs uppercase tracking-wider leading-tight" style={{ color: 'var(--text-muted)' }}>
+                        {week.label}
+                      </h3>
+                    </div>
+                    <div className="flex items-baseline gap-2 mb-3">
+                      <span className="text-base font-black" style={{ color: 'var(--gold)' }}>
+                        {fmt$(weekTotal)}
+                      </span>
+                      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                        {weekDeals} deal{weekDeals !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div className="space-y-2.5">
+                      {entries.map((e, i) => (
+                        <div key={e.name}>
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="flex items-center gap-1 text-white font-medium truncate">
+                              {i < 3 && <span className="text-xs">{MEDALS[i]}</span>}
+                              <span className="truncate">{e.name.split(' ')[0]}</span>
+                            </span>
+                            <span style={{ color: i === 0 ? 'var(--gold)' : 'var(--text-muted)' }} className="shrink-0 ml-1">
+                              {fmt$(e.revenue)}
+                            </span>
+                          </div>
+                          <div
+                            className="h-1 rounded-full overflow-hidden"
+                            style={{ background: 'var(--bg-secondary)' }}
+                          >
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${(e.revenue / weekMax) * 100}%`,
                                 background: i === 0
                                   ? 'linear-gradient(90deg, #C9A84C, #F5D060)'
                                   : 'var(--blue-accent)',
