@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 
 interface PeriodStats {
   revenue: number;
@@ -97,6 +98,7 @@ export default function LeaderboardPage() {
   const [countdown, setCountdown] = useState(REFRESH_SECONDS);
   const [refreshing, setRefreshing] = useState(false);
   const [showPastMonths, setShowPastMonths] = useState(false);
+  const [showPastWeeks, setShowPastWeeks] = useState(false);
   const countdownRef = useRef(REFRESH_SECONDS);
 
   const fetchData = useCallback(async (manual = false) => {
@@ -249,14 +251,23 @@ export default function LeaderboardPage() {
                 ? 'Refreshing…'
                 : `Auto-refresh in ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, '0')}`}
             </p>
-            <button
-              onClick={() => fetchData(true)}
-              disabled={refreshing}
-              className="text-xs px-3 py-1.5 rounded-md font-medium transition-all hover:opacity-80 disabled:opacity-40"
-              style={{ border: '1px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-card)' }}
-            >
-              {refreshing ? '↻ Refreshing…' : '↻ Refresh Now'}
-            </button>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/setters"
+                className="text-xs px-3 py-1.5 rounded-md font-medium transition-all hover:opacity-80"
+                style={{ border: '1px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-card)' }}
+              >
+                Setter Board →
+              </Link>
+              <button
+                onClick={() => fetchData(true)}
+                disabled={refreshing}
+                className="text-xs px-3 py-1.5 rounded-md font-medium transition-all hover:opacity-80 disabled:opacity-40"
+                style={{ border: '1px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-card)' }}
+              >
+                {refreshing ? '↻ Refreshing…' : '↻ Refresh Now'}
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -288,37 +299,43 @@ export default function LeaderboardPage() {
 
         {/* ── Tabs ────────────────────────────────────────────────────────── */}
         <div className="flex flex-wrap gap-2 items-center">
-          <Tab active={selectedMonth === currentWeekKey} onClick={() => setSelectedMonth(currentWeekKey)}>
-            📅 This Week
-          </Tab>
-          {data?.months[0] && (
-            <Tab active={selectedMonth === currentMonthKey} onClick={() => setSelectedMonth(currentMonthKey)}>
-              📆 This Month
-            </Tab>
-          )}
-          <Tab active={selectedMonth === 'ytd'} onClick={() => setSelectedMonth('ytd')}>
+
+          {/* YTD */}
+          <Tab active={selectedMonth === 'ytd'} onClick={() => { setSelectedMonth('ytd'); setShowPastMonths(false); setShowPastWeeks(false); }}>
             📊 YTD
           </Tab>
 
-          {/* Previous months dropdown */}
-          {data && data.months.length > 1 && (
+          {/* This Month + previous months dropdown */}
+          {data && data.months.length > 0 && (
             <div className="relative">
-              <button
-                onClick={() => setShowPastMonths(p => !p)}
-                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center gap-1.5"
-                style={{
-                  background: showPastMonths || data.months.slice(1).some(m => m.key === selectedMonth)
-                    ? 'rgba(201,168,76,0.12)' : 'var(--bg-card)',
-                  color: data.months.slice(1).some(m => m.key === selectedMonth)
-                    ? 'var(--gold)' : 'var(--text-muted)',
-                  border: data.months.slice(1).some(m => m.key === selectedMonth)
-                    ? '1px solid var(--gold)' : '1px solid var(--border)',
-                }}
-              >
-                {data.months.slice(1).find(m => m.key === selectedMonth)?.label ?? 'Previous Months'}
-                <span style={{ fontSize: 10 }}>{showPastMonths ? '▲' : '▾'}</span>
-              </button>
-
+              <div className="flex items-stretch rounded-lg overflow-hidden" style={{ border: selectedMonth === currentMonthKey || data.months.slice(1).some(m => m.key === selectedMonth) ? '1px solid var(--gold)' : '1px solid var(--border)' }}>
+                {/* Main: selects This Month */}
+                <button
+                  onClick={() => { setSelectedMonth(currentMonthKey); setShowPastMonths(false); setShowPastWeeks(false); }}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
+                  style={{
+                    background: selectedMonth === currentMonthKey || data.months.slice(1).some(m => m.key === selectedMonth) ? 'rgba(201,168,76,0.1)' : 'var(--bg-card)',
+                    color: selectedMonth === currentMonthKey ? 'var(--gold)' : data.months.slice(1).some(m => m.key === selectedMonth) ? 'var(--gold)' : 'var(--text-muted)',
+                    fontWeight: selectedMonth === currentMonthKey || data.months.slice(1).some(m => m.key === selectedMonth) ? 700 : 500,
+                  }}
+                >
+                  📆 {data.months.slice(1).find(m => m.key === selectedMonth)?.label ?? 'This Month'}
+                </button>
+                {/* Chevron: opens past months */}
+                {data.months.length > 1 && (
+                  <button
+                    onClick={() => { setShowPastMonths(p => !p); setShowPastWeeks(false); }}
+                    className="px-2 py-1.5 text-xs transition-all"
+                    style={{
+                      background: showPastMonths ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.05)',
+                      color: 'var(--text-muted)',
+                      borderLeft: '1px solid var(--border)',
+                    }}
+                  >
+                    {showPastMonths ? '▲' : '▾'}
+                  </button>
+                )}
+              </div>
               {showPastMonths && (
                 <div
                   className="absolute top-full left-0 mt-1 rounded-xl overflow-hidden z-20 min-w-max"
@@ -328,7 +345,7 @@ export default function LeaderboardPage() {
                     <button
                       key={m.key}
                       onClick={() => { setSelectedMonth(m.key); setShowPastMonths(false); }}
-                      className="block w-full text-left px-4 py-2.5 text-sm transition-colors"
+                      className="block w-full text-left px-4 py-2.5 text-sm"
                       style={{
                         background: selectedMonth === m.key ? 'rgba(201,168,76,0.1)' : 'transparent',
                         color: selectedMonth === m.key ? 'var(--gold)' : 'var(--text-muted)',
@@ -343,6 +360,63 @@ export default function LeaderboardPage() {
               )}
             </div>
           )}
+
+          {/* This Week + previous weeks dropdown */}
+          {data && data.weeks.length > 0 && (
+            <div className="relative">
+              <div className="flex items-stretch rounded-lg overflow-hidden" style={{ border: isWeekKey(selectedMonth) ? '1px solid var(--gold)' : '1px solid var(--border)' }}>
+                {/* Main: selects This Week */}
+                <button
+                  onClick={() => { setSelectedMonth(currentWeekKey); setShowPastWeeks(false); setShowPastMonths(false); }}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
+                  style={{
+                    background: isWeekKey(selectedMonth) ? 'rgba(201,168,76,0.1)' : 'var(--bg-card)',
+                    color: isWeekKey(selectedMonth) ? 'var(--gold)' : 'var(--text-muted)',
+                    fontWeight: isWeekKey(selectedMonth) ? 700 : 500,
+                  }}
+                >
+                  📅 {data.weeks.find(w => w.key === selectedMonth)?.label ?? 'This Week'}
+                </button>
+                {/* Chevron: opens past weeks */}
+                {data.weeks.length > 1 && (
+                  <button
+                    onClick={() => { setShowPastWeeks(p => !p); setShowPastMonths(false); }}
+                    className="px-2 py-1.5 text-xs transition-all"
+                    style={{
+                      background: showPastWeeks ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.05)',
+                      color: 'var(--text-muted)',
+                      borderLeft: '1px solid var(--border)',
+                    }}
+                  >
+                    {showPastWeeks ? '▲' : '▾'}
+                  </button>
+                )}
+              </div>
+              {showPastWeeks && (
+                <div
+                  className="absolute top-full left-0 mt-1 rounded-xl overflow-hidden z-20 min-w-max"
+                  style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
+                >
+                  {data.weeks.slice(1).map(w => (
+                    <button
+                      key={w.key}
+                      onClick={() => { setSelectedMonth(w.key); setShowPastWeeks(false); }}
+                      className="block w-full text-left px-4 py-2.5 text-sm"
+                      style={{
+                        background: selectedMonth === w.key ? 'rgba(201,168,76,0.1)' : 'transparent',
+                        color: selectedMonth === w.key ? 'var(--gold)' : 'var(--text-muted)',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = selectedMonth === w.key ? 'rgba(201,168,76,0.1)' : 'transparent')}
+                    >
+                      {w.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
 
         {/* ── Leaderboard table ───────────────────────────────────────────── */}
