@@ -30,6 +30,8 @@ interface ApiResponse {
   teamShowRate: number;
   months: { key: string; label: string }[];
   weeks: { key: string; label: string }[];
+  year: number;
+  availableYears: number[];
   isDemo: boolean;
   updatedAt: string;
   error?: string;
@@ -92,15 +94,17 @@ export default function SettersPage() {
   const [selectedPeriod, setSelectedPeriod] = useState<string>('ytd');
   const [showPastMonths, setShowPastMonths] = useState(false);
   const [showPastWeeks, setShowPastWeeks] = useState(false);
+  const [showYearDropdown, setShowYearDropdown] = useState(false);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [countdown, setCountdown] = useState(REFRESH_SECONDS);
   const [refreshing, setRefreshing] = useState(false);
   const countdownRef = useRef(REFRESH_SECONDS);
 
-  const fetchData = useCallback(async (manual = false) => {
+  const fetchData = useCallback(async (manual = false, year?: number) => {
     if (manual) setRefreshing(true);
     try {
-      const res = await fetch('/api/setters');
-      if (!res.ok) throw new Error('Bad response');
+      const y = year ?? selectedYear;
+      const res = await fetch(`/api/setters?year=${y}`);
       const json: ApiResponse = await res.json();
       if (json.error) throw new Error(json.error);
       setData(json);
@@ -113,7 +117,16 @@ export default function SettersPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [selectedYear]);
+
+  const handleYearChange = (year: number) => {
+    setSelectedYear(year);
+    setSelectedPeriod('ytd');
+    setShowYearDropdown(false);
+    setShowPastMonths(false);
+    setShowPastWeeks(false);
+    fetchData(false, year);
+  };
 
   useEffect(() => {
     fetchData();
@@ -314,19 +327,60 @@ export default function SettersPage() {
         {/* ── Period tabs ──────────────────────────────────────────────────── */}
         <div className="flex flex-wrap gap-2 items-center">
 
-          {/* YTD */}
-          <button
-            onClick={() => { setSelectedPeriod('ytd'); setShowPastMonths(false); setShowPastWeeks(false); }}
-            className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all"
-            style={{
-              background: selectedPeriod === 'ytd' ? 'var(--gold)' : 'var(--bg-card)',
-              color: selectedPeriod === 'ytd' ? '#000' : 'var(--text-muted)',
-              border: selectedPeriod === 'ytd' ? '1px solid var(--gold)' : '1px solid var(--border)',
-              fontWeight: selectedPeriod === 'ytd' ? 700 : 500,
-            }}
-          >
-            📊 YTD
-          </button>
+          {/* Year / YTD selector */}
+          <div className="relative">
+            <div
+              className="flex items-stretch rounded-lg overflow-hidden"
+              style={{ border: selectedPeriod === 'ytd' ? '1px solid var(--gold)' : '1px solid var(--border)' }}
+            >
+              <button
+                onClick={() => { setSelectedPeriod('ytd'); setShowPastMonths(false); setShowPastWeeks(false); setShowYearDropdown(false); }}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
+                style={{
+                  background: selectedPeriod === 'ytd' ? 'rgba(201,168,76,0.1)' : 'var(--bg-card)',
+                  color: selectedPeriod === 'ytd' ? 'var(--gold)' : 'var(--text-muted)',
+                  fontWeight: selectedPeriod === 'ytd' ? 700 : 500,
+                }}
+              >
+                📊 {selectedYear === new Date().getFullYear() ? 'YTD' : selectedYear}
+              </button>
+              {data && data.availableYears.length > 1 && (
+                <button
+                  onClick={() => { setShowYearDropdown(p => !p); setShowPastMonths(false); setShowPastWeeks(false); }}
+                  className="px-2 py-1.5 text-xs transition-all"
+                  style={{
+                    background: showYearDropdown ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.05)',
+                    color: 'var(--text-muted)',
+                    borderLeft: '1px solid var(--border)',
+                  }}
+                >
+                  {showYearDropdown ? '▲' : '▾'}
+                </button>
+              )}
+            </div>
+            {showYearDropdown && data && (
+              <div
+                className="absolute top-full left-0 mt-1 rounded-xl overflow-hidden z-20 min-w-max"
+                style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
+              >
+                {data.availableYears.map(y => (
+                  <button
+                    key={y}
+                    onClick={() => handleYearChange(y)}
+                    className="block w-full text-left px-4 py-2.5 text-sm"
+                    style={{
+                      background: selectedYear === y ? 'rgba(201,168,76,0.1)' : 'transparent',
+                      color: selectedYear === y ? 'var(--gold)' : 'var(--text-muted)',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = selectedYear === y ? 'rgba(201,168,76,0.1)' : 'transparent')}
+                  >
+                    {y === new Date().getFullYear() ? `${y} (YTD)` : String(y)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* This Month + dropdown */}
           {data && data.months.length > 0 && (

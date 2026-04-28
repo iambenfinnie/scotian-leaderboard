@@ -116,10 +116,15 @@ function cleanName(raw: string): string {
   return raw.replace(/^[^\w\s]*\s*/, '').trim();
 }
 
-// ── RepCard API fetch (paginated, YTD) ────────────────────────────────────────
+// ── RepCard API fetch (paginated, per year) ───────────────────────────────────
 
-async function fetchPage(page: number): Promise<{ items: RepCardAppointment[]; totalPages: number }> {
-  const res = await fetch(`${BASE}/appointments?per_page=100&page=${page}`, {
+async function fetchPage(
+  page: number,
+  fromDate: string,
+  toDate: string,
+): Promise<{ items: RepCardAppointment[]; totalPages: number }> {
+  const url = `${BASE}/appointments?from_date=${fromDate}&to_date=${toDate}&per_page=100&page=${page}`;
+  const res = await fetch(url, {
     headers: { 'x-api-key': API_KEY! },
     cache: 'no-store',
   });
@@ -130,9 +135,11 @@ async function fetchPage(page: number): Promise<{ items: RepCardAppointment[]; t
   return { items: result.data ?? [], totalPages: result.totalPages ?? 1 };
 }
 
-async function fetchAppointments(): Promise<RepCardAppointment[]> {
-  // Fetch page 1 to learn total pages, then fetch the rest in parallel batches
-  const { items: firstItems, totalPages } = await fetchPage(1);
+async function fetchAppointments(year: number): Promise<RepCardAppointment[]> {
+  const fromDate = `${year}-01-01`;
+  const toDate = `${year}-12-31`;
+
+  const { items: firstItems, totalPages } = await fetchPage(1, fromDate, toDate);
   if (totalPages <= 1) return firstItems;
 
   const all = [...firstItems];
@@ -141,7 +148,7 @@ async function fetchAppointments(): Promise<RepCardAppointment[]> {
   for (let start = 2; start <= totalPages; start += BATCH) {
     const end = Math.min(start + BATCH - 1, totalPages);
     const pages = Array.from({ length: end - start + 1 }, (_, i) => start + i);
-    const batches = await Promise.all(pages.map(p => fetchPage(p)));
+    const batches = await Promise.all(pages.map(p => fetchPage(p, fromDate, toDate)));
     for (const { items } of batches) all.push(...items);
   }
 
@@ -255,7 +262,11 @@ function getDemoData(): Map<string, SetterAccum> {
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
-export async function GET() {
+export async function GET(req: Request) {
+  const currentYear = new Date().getFullYear();
+  const { searchParams } = new URL(req.url);
+  const year = parseInt(searchParams.get('year') ?? String(currentYear));
+
   try {
     let setterMap: Map<string, SetterAccum>;
     let isDemo = false;
@@ -264,7 +275,7 @@ export async function GET() {
       setterMap = getDemoData();
       isDemo = true;
     } else {
-      const appointments = await fetchAppointments();
+      const appointments = await fetchAppointments(year);
       setterMap = processAppointments(appointments);
     }
 
@@ -312,12 +323,18 @@ export async function GET() {
         ? ratedSetters.reduce((s, c) => s + c.showRate, 0) / ratedSetters.length
         : 0;
 
+    // Available years: from 2025 up to current year
+    const availableYears: number[] = [];
+    for (let y = currentYear; y >= 2025; y--) availableYears.push(y);
+
     return NextResponse.json({
       setters,
       totalAppointments: setters.reduce((s, c) => s + c.totalBooked, 0),
       teamShowRate,
       months,
       weeks,
+      year,
+      availableYears,
       isDemo,
       updatedAt: new Date().toISOString(),
     });
