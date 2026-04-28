@@ -96,6 +96,7 @@ export default function LeaderboardPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>('ytd');
   const [countdown, setCountdown] = useState(REFRESH_SECONDS);
   const [refreshing, setRefreshing] = useState(false);
+  const [showPastMonths, setShowPastMonths] = useState(false);
   const countdownRef = useRef(REFRESH_SECONDS);
 
   const fetchData = useCallback(async (manual = false) => {
@@ -285,19 +286,63 @@ export default function LeaderboardPage() {
           />
         </div>
 
-        {/* ── Month tabs ──────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap gap-2">
-          <Tab active={selectedMonth === 'ytd'} onClick={() => setSelectedMonth('ytd')}>
-            📊 YTD
-          </Tab>
+        {/* ── Tabs ────────────────────────────────────────────────────────── */}
+        <div className="flex flex-wrap gap-2 items-center">
           <Tab active={selectedMonth === currentWeekKey} onClick={() => setSelectedMonth(currentWeekKey)}>
             📅 This Week
           </Tab>
-          {data?.months.map(m => (
-            <Tab key={m.key} active={selectedMonth === m.key} onClick={() => setSelectedMonth(m.key)}>
-              {m.key === currentMonthKey ? '📆 This Month' : m.label}
+          {data?.months[0] && (
+            <Tab active={selectedMonth === currentMonthKey} onClick={() => setSelectedMonth(currentMonthKey)}>
+              📆 This Month
             </Tab>
-          ))}
+          )}
+          <Tab active={selectedMonth === 'ytd'} onClick={() => setSelectedMonth('ytd')}>
+            📊 YTD
+          </Tab>
+
+          {/* Previous months dropdown */}
+          {data && data.months.length > 1 && (
+            <div className="relative">
+              <button
+                onClick={() => setShowPastMonths(p => !p)}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center gap-1.5"
+                style={{
+                  background: showPastMonths || data.months.slice(1).some(m => m.key === selectedMonth)
+                    ? 'rgba(201,168,76,0.12)' : 'var(--bg-card)',
+                  color: data.months.slice(1).some(m => m.key === selectedMonth)
+                    ? 'var(--gold)' : 'var(--text-muted)',
+                  border: data.months.slice(1).some(m => m.key === selectedMonth)
+                    ? '1px solid var(--gold)' : '1px solid var(--border)',
+                }}
+              >
+                {data.months.slice(1).find(m => m.key === selectedMonth)?.label ?? 'Previous Months'}
+                <span style={{ fontSize: 10 }}>{showPastMonths ? '▲' : '▾'}</span>
+              </button>
+
+              {showPastMonths && (
+                <div
+                  className="absolute top-full left-0 mt-1 rounded-xl overflow-hidden z-20 min-w-max"
+                  style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
+                >
+                  {data.months.slice(1).map(m => (
+                    <button
+                      key={m.key}
+                      onClick={() => { setSelectedMonth(m.key); setShowPastMonths(false); }}
+                      className="block w-full text-left px-4 py-2.5 text-sm transition-colors"
+                      style={{
+                        background: selectedMonth === m.key ? 'rgba(201,168,76,0.1)' : 'transparent',
+                        color: selectedMonth === m.key ? 'var(--gold)' : 'var(--text-muted)',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = selectedMonth === m.key ? 'rgba(201,168,76,0.1)' : 'transparent')}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── Leaderboard table ───────────────────────────────────────────── */}
@@ -311,9 +356,7 @@ export default function LeaderboardPage() {
             style={{ borderBottom: '1px solid var(--border)' }}
           >
             <h2 className="font-bold text-sm sm:text-base uppercase tracking-widest" style={{ color: 'var(--gold)' }}>
-              {selectedMonth === 'ytd'
-                ? 'Year-to-Date Leaderboard'
-                : (data?.months.find(m => m.key === selectedMonth)?.label ?? '') + ' Leaderboard'}
+              {periodLabel} Leaderboard
             </h2>
             {displayData.length > 0 && (
               <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
