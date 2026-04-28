@@ -283,6 +283,9 @@ export default function LeaderboardPage() {
           <Tab active={selectedMonth === 'ytd'} onClick={() => setSelectedMonth('ytd')}>
             📊 YTD
           </Tab>
+          <Tab active={selectedMonth === currentWeekKey} onClick={() => setSelectedMonth(currentWeekKey)}>
+            📅 This Week
+          </Tab>
           {data?.months.map(m => (
             <Tab key={m.key} active={selectedMonth === m.key} onClick={() => setSelectedMonth(m.key)}>
               {m.label}
