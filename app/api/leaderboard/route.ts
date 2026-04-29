@@ -117,7 +117,8 @@ export async function GET() {
       const sitCompleted = row[6]?.trim().toLowerCase() === 'yes';
       const isSold = dealStatus === 'Sold';
       const dealValue = parseMoney(row[8]);
-      const soldDate = parseDate(row[9]);
+      const apptDate = parseDate(row[5]); // Appointment Start Time — present for all rows
+      const soldDate = parseDate(row[9]); // Sold Date — only present for Sold rows
 
       if (!closers.has(closer)) {
         closers.set(closer, {
@@ -136,10 +137,11 @@ export async function GET() {
       c.leads++;
       if (sitCompleted) c.sits++;
 
-      // Track sit per period using soldDate as proxy (best available date)
-      if (sitCompleted && soldDate) {
-        const mk = monthKey(soldDate);
-        const wk = weekKey(soldDate);
+      // Bucket sits by appointment date (always present, even for not-sold rows)
+      const sitDate = apptDate ?? soldDate;
+      if (sitCompleted && sitDate) {
+        const mk = monthKey(sitDate);
+        const wk = weekKey(sitDate);
         if (!c.monthly[mk]) c.monthly[mk] = { revenue: 0, deals: 0, sits: 0 };
         if (!c.weekly[wk]) c.weekly[wk] = { revenue: 0, deals: 0, sits: 0 };
         c.monthly[mk].sits++;
