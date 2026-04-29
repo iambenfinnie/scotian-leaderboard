@@ -11,12 +11,6 @@ interface PeriodCounts {
   pending: number;
 }
 
-interface DoorPeriod {
-  doors: number;
-  dms: number;
-  fieldMinutes: number;
-}
-
 interface SetterStats {
   rank: number;
   name: string;
@@ -26,33 +20,20 @@ interface SetterStats {
   cancel: number;
   pending: number;
   showRate: number;
-  doors: number;
-  dms: number;
-  closeRatio: number;
-  totalFieldMinutes: number;
-  workingDays: number;
-  avgStartMinute: number;
-  avgEndMinute: number;
-  avgStartFmt: string;
-  avgEndFmt: string;
   monthly: Record<string, PeriodCounts>;
   weekly: Record<string, PeriodCounts>;
-  monthlyDoor: Record<string, DoorPeriod>;
-  weeklyDoor: Record<string, DoorPeriod>;
 }
 
 interface ApiResponse {
   setters: SetterStats[];
   totalAppointments: number;
-  totalDoors: number;
+  totalShows: number;
   teamShowRate: number;
-  teamCloseRatio: number;
   months: { key: string; label: string }[];
   weeks: { key: string; label: string }[];
   year: number;
   availableYears: number[];
   isDemo: boolean;
-  doorStatsUnavailable?: boolean;
   updatedAt: string;
   error?: string;
 }
@@ -97,20 +78,6 @@ function getCurrentMonthKey() {
 
 function isWeekKey(key: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(key);
-}
-
-function fmtFieldTime(mins: number) {
-  if (!mins || mins <= 0) return '—';
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h === 0) return `${m}m`;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
-function closeRatioStyle(rate: number) {
-  if (rate >= 0.15) return { bg: 'rgba(34,197,94,0.15)', color: '#22C55E' };
-  if (rate >= 0.08) return { bg: 'rgba(234,179,8,0.15)', color: '#EAB308' };
-  return { bg: 'rgba(239,68,68,0.1)', color: '#EF4444' };
 }
 
 function showRateStyle(rate: number) {
@@ -178,24 +145,18 @@ export default function SettersPage() {
   const currentWeekKey = getCurrentWeekKey();
   const currentMonthKey = getCurrentMonthKey();
 
-  // ── Compute display rows based on selected period ─────────────────────────
+  // ── Compute display rows based on selected period ───────────────────────────
   const displaySetters: SetterStats[] = (() => {
     if (!data) return [];
     if (selectedPeriod === 'ytd') return data.setters;
 
-    const isWeek = isWeekKey(selectedPeriod);
-    const periodMap = isWeek ? 'weekly' : 'monthly';
-    const doorMap = isWeek ? 'weeklyDoor' : 'monthlyDoor';
+    const periodMap = isWeekKey(selectedPeriod) ? 'weekly' : 'monthly';
     return data.setters
       .map(s => {
         const p: PeriodCounts = s[periodMap][selectedPeriod] ?? {
           sat: 0, noshow: 0, cancel: 0, pending: 0,
         };
-        const dp: DoorPeriod = s[doorMap][selectedPeriod] ?? {
-          doors: 0, dms: 0, fieldMinutes: 0,
-        };
         const showable = p.sat + p.noshow;
-        const closeRatio = dp.dms > 0 ? p.sat / dp.dms : 0;
         return {
           ...s,
           totalBooked: p.sat + p.noshow + p.cancel + p.pending,
@@ -204,13 +165,9 @@ export default function SettersPage() {
           cancel: p.cancel,
           pending: p.pending,
           showRate: showable > 0 ? p.sat / showable : 0,
-          doors: dp.doors,
-          dms: dp.dms,
-          closeRatio,
-          totalFieldMinutes: dp.fieldMinutes,
         };
       })
-      .filter(s => s.totalBooked > 0 || s.doors > 0)
+      .filter(s => s.totalBooked > 0)
       .sort((a, b) => b.totalBooked - a.totalBooked)
       .map((s, i) => ({ ...s, rank: i + 1 }));
   })();
@@ -234,7 +191,7 @@ export default function SettersPage() {
 
   const topSetter = displaySetters[0];
 
-  // ── Loading ────────────────────────────────────────────────────────────────
+  // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div
@@ -252,7 +209,7 @@ export default function SettersPage() {
     );
   }
 
-  // ── Error ──────────────────────────────────────────────────────────────────
+  // ── Error ────────────────────────────────────────────────────────────────────
   if (error && !data) {
     return (
       <div
@@ -271,10 +228,10 @@ export default function SettersPage() {
     );
   }
 
-  // ── Main dashboard ─────────────────────────────────────────────────────────
+  // ── Main dashboard ───────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      {/* ── Header ────────────────────────────────────────────────────────────── */}
       <header
         style={{
           background: 'linear-gradient(180deg, #0D1C32 0%, #07101E 100%)',
@@ -282,7 +239,7 @@ export default function SettersPage() {
         }}
       >
         <div
-          style={{ maxWidth: 1200 }}
+          style={{ maxWidth: 1100 }}
           className="mx-auto px-4 sm:px-6 py-5 flex items-center justify-between gap-4"
         >
           <div>
@@ -315,41 +272,24 @@ export default function SettersPage() {
                 : `Auto-refresh in ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, '0')}`}
             </p>
             <button
-                onClick={() => fetchData(true)}
-                disabled={refreshing}
-                className="text-xs px-3 py-1.5 rounded-md font-medium transition-all hover:opacity-80 disabled:opacity-40"
-                style={{
-                  border: '1px solid var(--border)',
-                  color: 'var(--text-muted)',
-                  background: 'var(--bg-card)',
-                }}
-              >
-                {refreshing ? '↻ Refreshing…' : '↻ Refresh Now'}
-              </button>
+              onClick={() => fetchData(true)}
+              disabled={refreshing}
+              className="text-xs px-3 py-1.5 rounded-md font-medium transition-all hover:opacity-80 disabled:opacity-40"
+              style={{
+                border: '1px solid var(--border)',
+                color: 'var(--text-muted)',
+                background: 'var(--bg-card)',
+              }}
+            >
+              {refreshing ? '↻ Refreshing…' : '↻ Refresh Now'}
+            </button>
           </div>
         </div>
       </header>
 
-      <main style={{ maxWidth: 1200 }} className="mx-auto px-4 sm:px-6 py-8 space-y-8">
+      <main style={{ maxWidth: 1100 }} className="mx-auto px-4 sm:px-6 py-8 space-y-8">
 
-        {/* ── Door stats unavailable banner ───────────────────────────────── */}
-        {data?.doorStatsUnavailable && (
-          <div
-            className="rounded-lg px-4 py-3 text-sm flex items-center gap-3"
-            style={{
-              background: 'rgba(96,165,250,0.08)',
-              border: '1px solid rgba(96,165,250,0.3)',
-              color: '#60A5FA',
-            }}
-          >
-            <span className="font-bold shrink-0">Door Stats Unavailable</span>
-            <span style={{ color: 'var(--text-muted)' }}>
-              RepCard rate-limited the door knock data. Appointment stats are accurate. Door columns will show — until the cache warms up.
-            </span>
-          </div>
-        )}
-
-        {/* ── Demo banner ─────────────────────────────────────────────────── */}
+        {/* ── Demo banner ───────────────────────────────────────────────────── */}
         {data?.isDemo && (
           <div
             className="rounded-lg px-4 py-3 text-sm flex items-center gap-3"
@@ -361,33 +301,36 @@ export default function SettersPage() {
           >
             <span className="font-bold shrink-0">Demo Mode</span>
             <span style={{ color: 'var(--text-muted)' }}>
-              Add your RepCard API key to <code className="text-xs px-1 py-0.5 rounded" style={{ background: 'var(--bg-secondary)' }}>REPCARD_API_KEY</code> in <code className="text-xs px-1 py-0.5 rounded" style={{ background: 'var(--bg-secondary)' }}>.env.local</code> to see live data.
+              Add your RepCard API key to{' '}
+              <code className="text-xs px-1 py-0.5 rounded" style={{ background: 'var(--bg-secondary)' }}>
+                REPCARD_API_KEY
+              </code>{' '}
+              in Vercel environment variables to see live data.
             </span>
           </div>
         )}
 
-        {/* ── Summary cards ───────────────────────────────────────────────── */}
+        {/* ── Summary cards ─────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <StatCard label={`Appointments Set (${periodLabel})`} value={String(periodTotal)} gold />
-          <StatCard label={`Total Doors (${periodLabel})`} value={String(displaySetters.reduce((s, c) => s + c.doors, 0) || '—')} />
+          <StatCard
+            label={`Shows (${periodLabel})`}
+            value={String(periodSat)}
+            sub="appointments held"
+          />
           <StatCard
             label={`Team Show Rate (${periodLabel})`}
-            value={fmtPct(teamShowRate)}
+            value={periodSat + periodNoshow > 0 ? fmtPct(teamShowRate) : '—'}
             sub="shows ÷ (shows + no-shows)"
           />
           <StatCard
-            label={`Team Close Ratio (${periodLabel})`}
-            value={(() => {
-              const withDms = displaySetters.filter(s => s.dms > 0);
-              if (!withDms.length) return '—';
-              const avg = withDms.reduce((s, c) => s + c.closeRatio, 0) / withDms.length;
-              return fmtPct(avg);
-            })()}
-            sub="appts set ÷ DMs spoken to"
+            label={`No-Shows (${periodLabel})`}
+            value={String(periodNoshow)}
+            sub="appointments not held"
           />
         </div>
 
-        {/* ── Period tabs ──────────────────────────────────────────────────── */}
+        {/* ── Period tabs ────────────────────────────────────────────────────── */}
         <div className="flex flex-wrap gap-2 items-center">
 
           {/* Year / YTD selector */}
@@ -397,7 +340,12 @@ export default function SettersPage() {
               style={{ border: selectedPeriod === 'ytd' ? '1px solid var(--gold)' : '1px solid var(--border)' }}
             >
               <button
-                onClick={() => { setSelectedPeriod('ytd'); setShowPastMonths(false); setShowPastWeeks(false); setShowYearDropdown(false); }}
+                onClick={() => {
+                  setSelectedPeriod('ytd');
+                  setShowPastMonths(false);
+                  setShowPastWeeks(false);
+                  setShowYearDropdown(false);
+                }}
                 className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
                 style={{
                   background: selectedPeriod === 'ytd' ? 'rgba(201,168,76,0.1)' : 'var(--bg-card)',
@@ -409,7 +357,11 @@ export default function SettersPage() {
               </button>
               {data && data.availableYears.length > 1 && (
                 <button
-                  onClick={() => { setShowYearDropdown(p => !p); setShowPastMonths(false); setShowPastWeeks(false); }}
+                  onClick={() => {
+                    setShowYearDropdown(p => !p);
+                    setShowPastMonths(false);
+                    setShowPastWeeks(false);
+                  }}
                   className="px-2 py-1.5 text-xs transition-all"
                   style={{
                     background: showYearDropdown ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.05)',
@@ -424,7 +376,11 @@ export default function SettersPage() {
             {showYearDropdown && data && (
               <div
                 className="absolute top-full left-0 mt-1 rounded-xl overflow-hidden z-20 min-w-max"
-                style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
+                style={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border)',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                }}
               >
                 {data.availableYears.map(y => (
                   <button
@@ -436,7 +392,10 @@ export default function SettersPage() {
                       color: selectedYear === y ? 'var(--gold)' : 'var(--text-muted)',
                     }}
                     onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = selectedYear === y ? 'rgba(201,168,76,0.1)' : 'transparent')}
+                    onMouseLeave={e =>
+                      (e.currentTarget.style.background =
+                        selectedYear === y ? 'rgba(201,168,76,0.1)' : 'transparent')
+                    }
                   >
                     {y === new Date().getFullYear() ? `${y} (YTD)` : String(y)}
                   </button>
@@ -448,21 +407,42 @@ export default function SettersPage() {
           {/* This Month + dropdown */}
           {data && data.months.length > 0 && (
             <div className="relative">
-              <div className="flex items-stretch rounded-lg overflow-hidden" style={{ border: selectedPeriod === currentMonthKey || data.months.slice(1).some(m => m.key === selectedPeriod) ? '1px solid var(--gold)' : '1px solid var(--border)' }}>
+              <div
+                className="flex items-stretch rounded-lg overflow-hidden"
+                style={{
+                  border:
+                    !isWeekKey(selectedPeriod) && selectedPeriod !== 'ytd'
+                      ? '1px solid var(--gold)'
+                      : '1px solid var(--border)',
+                }}
+              >
                 <button
-                  onClick={() => { setSelectedPeriod(currentMonthKey); setShowPastMonths(false); setShowPastWeeks(false); }}
+                  onClick={() => {
+                    setSelectedPeriod(currentMonthKey);
+                    setShowPastMonths(false);
+                    setShowPastWeeks(false);
+                  }}
                   className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
                   style={{
-                    background: selectedPeriod === currentMonthKey || data.months.slice(1).some(m => m.key === selectedPeriod) ? 'rgba(201,168,76,0.1)' : 'var(--bg-card)',
-                    color: selectedPeriod === currentMonthKey || data.months.slice(1).some(m => m.key === selectedPeriod) ? 'var(--gold)' : 'var(--text-muted)',
-                    fontWeight: selectedPeriod === currentMonthKey || data.months.slice(1).some(m => m.key === selectedPeriod) ? 700 : 500,
+                    background:
+                      !isWeekKey(selectedPeriod) && selectedPeriod !== 'ytd'
+                        ? 'rgba(201,168,76,0.1)'
+                        : 'var(--bg-card)',
+                    color:
+                      !isWeekKey(selectedPeriod) && selectedPeriod !== 'ytd'
+                        ? 'var(--gold)'
+                        : 'var(--text-muted)',
+                    fontWeight: !isWeekKey(selectedPeriod) && selectedPeriod !== 'ytd' ? 700 : 500,
                   }}
                 >
                   📆 {data.months.slice(1).find(m => m.key === selectedPeriod)?.label ?? 'This Month'}
                 </button>
                 {data.months.length > 1 && (
                   <button
-                    onClick={() => { setShowPastMonths(p => !p); setShowPastWeeks(false); }}
+                    onClick={() => {
+                      setShowPastMonths(p => !p);
+                      setShowPastWeeks(false);
+                    }}
                     className="px-2 py-1.5 text-xs transition-all"
                     style={{
                       background: showPastMonths ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.05)',
@@ -477,7 +457,11 @@ export default function SettersPage() {
               {showPastMonths && (
                 <div
                   className="absolute top-full left-0 mt-1 rounded-xl overflow-hidden z-20 min-w-max"
-                  style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
+                  style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border)',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                  }}
                 >
                   {data.months.slice(1).map(m => (
                     <button
@@ -489,7 +473,10 @@ export default function SettersPage() {
                         color: selectedPeriod === m.key ? 'var(--gold)' : 'var(--text-muted)',
                       }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = selectedPeriod === m.key ? 'rgba(201,168,76,0.1)' : 'transparent')}
+                      onMouseLeave={e =>
+                        (e.currentTarget.style.background =
+                          selectedPeriod === m.key ? 'rgba(201,168,76,0.1)' : 'transparent')
+                      }
                     >
                       {m.label}
                     </button>
@@ -502,9 +489,18 @@ export default function SettersPage() {
           {/* This Week + dropdown */}
           {data && data.weeks.length > 0 && (
             <div className="relative">
-              <div className="flex items-stretch rounded-lg overflow-hidden" style={{ border: isWeekKey(selectedPeriod) ? '1px solid var(--gold)' : '1px solid var(--border)' }}>
+              <div
+                className="flex items-stretch rounded-lg overflow-hidden"
+                style={{
+                  border: isWeekKey(selectedPeriod) ? '1px solid var(--gold)' : '1px solid var(--border)',
+                }}
+              >
                 <button
-                  onClick={() => { setSelectedPeriod(currentWeekKey); setShowPastWeeks(false); setShowPastMonths(false); }}
+                  onClick={() => {
+                    setSelectedPeriod(currentWeekKey);
+                    setShowPastWeeks(false);
+                    setShowPastMonths(false);
+                  }}
                   className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
                   style={{
                     background: isWeekKey(selectedPeriod) ? 'rgba(201,168,76,0.1)' : 'var(--bg-card)',
@@ -516,7 +512,10 @@ export default function SettersPage() {
                 </button>
                 {data.weeks.length > 1 && (
                   <button
-                    onClick={() => { setShowPastWeeks(p => !p); setShowPastMonths(false); }}
+                    onClick={() => {
+                      setShowPastWeeks(p => !p);
+                      setShowPastMonths(false);
+                    }}
                     className="px-2 py-1.5 text-xs transition-all"
                     style={{
                       background: showPastWeeks ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.05)',
@@ -531,7 +530,11 @@ export default function SettersPage() {
               {showPastWeeks && (
                 <div
                   className="absolute top-full left-0 mt-1 rounded-xl overflow-hidden z-20 min-w-max"
-                  style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
+                  style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border)',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                  }}
                 >
                   {data.weeks.slice(1).map(w => (
                     <button
@@ -543,7 +546,10 @@ export default function SettersPage() {
                         color: selectedPeriod === w.key ? 'var(--gold)' : 'var(--text-muted)',
                       }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = selectedPeriod === w.key ? 'rgba(201,168,76,0.1)' : 'transparent')}
+                      onMouseLeave={e =>
+                        (e.currentTarget.style.background =
+                          selectedPeriod === w.key ? 'rgba(201,168,76,0.1)' : 'transparent')
+                      }
                     >
                       {w.label}
                     </button>
@@ -552,10 +558,9 @@ export default function SettersPage() {
               )}
             </div>
           )}
-
         </div>
 
-        {/* ── Setter table ─────────────────────────────────────────────────── */}
+        {/* ── Setter table ───────────────────────────────────────────────────── */}
         <section
           className="rounded-xl overflow-hidden gold-border-glow"
           style={{ border: '1px solid var(--border)', background: 'var(--bg-card)' }}
@@ -570,8 +575,7 @@ export default function SettersPage() {
             >
               {selectedPeriod === 'ytd'
                 ? 'Year-to-Date Setter Leaderboard'
-                : (data?.months.find(m => m.key === selectedPeriod)?.label ?? periodLabel) +
-                  ' Setter Leaderboard'}
+                : periodLabel + ' Setter Leaderboard'}
             </h2>
             {displaySetters.length > 0 && (
               <span
@@ -598,14 +602,8 @@ export default function SettersPage() {
                     <TH>Shows</TH>
                     <TH>No-Shows</TH>
                     <TH>Cancels</TH>
-                    {displaySetters[0]?.pending > 0 && <TH>Pending</TH>}
+                    {displaySetters.some(s => s.pending > 0) && <TH>Pending</TH>}
                     <TH>Show Rate</TH>
-                    <TH>Doors</TH>
-                    <TH>DMs</TH>
-                    <TH>Close Ratio</TH>
-                    <TH>First Door</TH>
-                    <TH>Last Door</TH>
-                    <TH>Time in Field</TH>
                   </tr>
                 </thead>
                 <tbody>
@@ -701,7 +699,7 @@ export default function SettersPage() {
                         </TD>
 
                         {/* Pending (only if any setter has pending) */}
-                        {displaySetters[0]?.pending > 0 && (
+                        {displaySetters.some(s => s.pending > 0) && (
                           <TD>
                             <span style={{ color: 'var(--text-muted)' }}>{s.pending}</span>
                           </TD>
@@ -716,51 +714,6 @@ export default function SettersPage() {
                             {s.sat + s.noshow > 0 ? fmtPct(s.showRate) : '—'}
                           </span>
                         </TD>
-
-                        {/* Doors knocked */}
-                        <TD>
-                          <span className="font-semibold text-white">{s.doors || '—'}</span>
-                        </TD>
-
-                        {/* Decision makers */}
-                        <TD>
-                          <span style={{ color: 'var(--text-muted)' }}>{s.dms || '—'}</span>
-                        </TD>
-
-                        {/* Close ratio */}
-                        <TD>
-                          {s.dms > 0 ? (
-                            <span
-                              className="inline-block px-2 py-0.5 rounded text-xs font-semibold"
-                              style={{ background: closeRatioStyle(s.closeRatio).bg, color: closeRatioStyle(s.closeRatio).color }}
-                            >
-                              {fmtPct(s.closeRatio)}
-                            </span>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)' }}>—</span>
-                          )}
-                        </TD>
-
-                        {/* First door / avg start */}
-                        <TD>
-                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                            {selectedPeriod === 'ytd' ? s.avgStartFmt : (s.doors > 0 ? s.avgStartFmt : '—')}
-                          </span>
-                        </TD>
-
-                        {/* Last door / avg end */}
-                        <TD>
-                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                            {selectedPeriod === 'ytd' ? s.avgEndFmt : (s.doors > 0 ? s.avgEndFmt : '—')}
-                          </span>
-                        </TD>
-
-                        {/* Time in field */}
-                        <TD>
-                          <span className="text-xs font-medium" style={{ color: '#60A5FA' }}>
-                            {fmtFieldTime(s.totalFieldMinutes)}
-                          </span>
-                        </TD>
                       </tr>
                     );
                   })}
@@ -770,7 +723,7 @@ export default function SettersPage() {
           )}
         </section>
 
-        {/* ── Monthly breakdown ────────────────────────────────────────────── */}
+        {/* ── Monthly breakdown ──────────────────────────────────────────────── */}
         {selectedPeriod === 'ytd' && data && data.months.length > 0 && (
           <section>
             <h2
@@ -832,9 +785,7 @@ export default function SettersPage() {
                               {i < 3 && <span>{MEDALS[i]}</span>}
                               {e.name}
                             </span>
-                            <span
-                              style={{ color: i === 0 ? 'var(--gold)' : 'var(--text-muted)' }}
-                            >
+                            <span style={{ color: i === 0 ? 'var(--gold)' : 'var(--text-muted)' }}>
                               {e.total}a · {e.sat}s
                             </span>
                           </div>
@@ -863,7 +814,7 @@ export default function SettersPage() {
           </section>
         )}
 
-        {/* ── Weekly breakdown ─────────────────────────────────────────────── */}
+        {/* ── Weekly breakdown ───────────────────────────────────────────────── */}
         {(selectedPeriod === 'ytd' || isWeekKey(selectedPeriod)) &&
           data &&
           data.weeks.length > 0 && (
@@ -881,7 +832,6 @@ export default function SettersPage() {
                       name: s.name,
                       sat: s.weekly[week.key]?.sat ?? 0,
                       noshow: s.weekly[week.key]?.noshow ?? 0,
-                      cancel: s.weekly[week.key]?.cancel ?? 0,
                       total:
                         (s.weekly[week.key]?.sat ?? 0) +
                         (s.weekly[week.key]?.noshow ?? 0) +
@@ -951,9 +901,7 @@ export default function SettersPage() {
                                 <span className="truncate">{e.name.split(' ')[0]}</span>
                               </span>
                               <span
-                                style={{
-                                  color: i === 0 ? 'var(--gold)' : 'var(--text-muted)',
-                                }}
+                                style={{ color: i === 0 ? 'var(--gold)' : 'var(--text-muted)' }}
                                 className="shrink-0 ml-1"
                               >
                                 {e.total}
@@ -979,10 +927,7 @@ export default function SettersPage() {
                       </div>
 
                       {isSelected && (
-                        <p
-                          className="text-xs mt-3 text-center"
-                          style={{ color: 'var(--text-muted)' }}
-                        >
+                        <p className="text-xs mt-3 text-center" style={{ color: 'var(--text-muted)' }}>
                           Click to deselect
                         </p>
                       )}
@@ -993,7 +938,7 @@ export default function SettersPage() {
             </section>
           )}
 
-        {/* ── Top setter spotlight ─────────────────────────────────────────── */}
+        {/* ── Top setter spotlight ───────────────────────────────────────────── */}
         {selectedPeriod === 'ytd' && topSetter && (
           <section
             className="rounded-xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
@@ -1010,8 +955,6 @@ export default function SettersPage() {
               <p className="text-2xl font-black text-white">{topSetter.name}</p>
               <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
                 {topSetter.sat} shows · {fmtPct(topSetter.showRate)} show rate
-                {topSetter.dms > 0 && ` · ${fmtPct(topSetter.closeRatio)} close ratio`}
-                {topSetter.doors > 0 && ` · ${topSetter.doors} doors`}
               </p>
             </div>
             <div className="text-right">
@@ -1023,7 +966,7 @@ export default function SettersPage() {
           </section>
         )}
 
-        {/* ── Footer ──────────────────────────────────────────────────────── */}
+        {/* ── Footer ────────────────────────────────────────────────────────── */}
         <footer className="text-center pb-4">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             {data?.isDemo
@@ -1041,7 +984,7 @@ export default function SettersPage() {
   );
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
+// ── Sub-components ──────────────────────────────────────────────────────────────
 
 function CalendarIcon() {
   return (
