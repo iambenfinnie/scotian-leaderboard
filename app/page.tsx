@@ -98,6 +98,8 @@ export default function LeaderboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [showPastMonths, setShowPastMonths] = useState(false);
   const [showPastWeeks, setShowPastWeeks] = useState(false);
+  const [showYearDropdown, setShowYearDropdown] = useState(false);
+  const [selectedRep, setSelectedRep] = useState<string | null>(null);
   const countdownRef = useRef(REFRESH_SECONDS);
 
   const fetchData = useCallback(async (manual = false) => {
@@ -198,6 +200,10 @@ export default function LeaderboardPage() {
 
   const topPerformer = data?.leaderboard[0];
 
+  // Selected rep data (period + YTD)
+  const selectedRepPeriod = selectedRep ? displayData.find(c => c.name === selectedRep) : null;
+  const selectedRepYTD = selectedRep ? data?.leaderboard.find(c => c.name === selectedRep) : null;
+
   // ── Loading screen ───────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -283,38 +289,120 @@ export default function LeaderboardPage() {
       <main style={{ maxWidth: 1200 }} className="mx-auto px-4 sm:px-6 py-8 space-y-8">
 
         {/* ── Summary cards ───────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <StatCard label={`Total Revenue (${periodLabel})`} value={fmt$(periodRevenue)} gold />
-          <StatCard label={`Deals Closed (${periodLabel})`} value={String(periodDeals)} />
-          {selectedMonth === 'ytd' ? (
+        {selectedRep && selectedRepYTD ? (
+          <>
+            <div className="flex items-center justify-between">
+              <p className="text-xs uppercase tracking-widest font-semibold" style={{ color: 'var(--gold)' }}>
+                {selectedRep} — {periodLabel}
+              </p>
+              <button
+                onClick={() => setSelectedRep(null)}
+                className="text-xs px-3 py-1 rounded-md transition-opacity hover:opacity-70"
+                style={{ border: '1px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-card)' }}
+              >
+                ✕ All Closers
+              </button>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              <StatCard label={`Revenue (${periodLabel})`} value={fmt$(selectedRepPeriod?.revenue ?? 0)} gold />
+              <StatCard label={`Deals (${periodLabel})`} value={String(selectedRepPeriod?.deals ?? 0)} />
+              <StatCard
+                label="Close Rate / Sit (YTD)"
+                value={fmtPct(selectedRepYTD.closeRatePerSit)}
+                sub={`${selectedRepYTD.sits} sits YTD`}
+              />
+              <StatCard
+                label="Revenue / Sit (YTD)"
+                value={fmt$(selectedRepYTD.revenuePerSit)}
+                sub={`${selectedRepYTD.deals} deals YTD`}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <StatCard label={`Total Revenue (${periodLabel})`} value={fmt$(periodRevenue)} gold />
+            <StatCard label={`Deals Closed (${periodLabel})`} value={String(periodDeals)} />
+            {selectedMonth === 'ytd' ? (
+              <StatCard label="This Month Revenue" value={fmt$(currentMonthRevenue)} />
+            ) : (
+              <StatCard
+                label={`${periodLabel} — Top Closer`}
+                value={displayData[0]?.name ?? '—'}
+                sub={displayData[0] ? fmt$(displayData[0].revenue) : undefined}
+              />
+            )}
             <StatCard
-              label="This Month Revenue"
-              value={fmt$(currentMonthRevenue)}
+              label={selectedMonth === 'ytd' ? 'Team Avg Close Rate' : 'Team Avg Close Rate (YTD)'}
+              value={fmtPct(avgCloseRate)}
+              sub="per sit"
             />
-          ) : (
-            <StatCard
-              label={`${periodLabel} — Top Closer`}
-              value={displayData[0]?.name ?? '—'}
-              sub={displayData[0] ? fmt$(displayData[0].revenue) : undefined}
-            />
-          )}
-          <StatCard
-            label={selectedMonth === 'ytd' ? 'Team Avg Close Rate' : 'Team Avg Close Rate (YTD)'}
-            value={fmtPct(avgCloseRate)}
-            sub="per sit"
-          />
-        </div>
+          </div>
+        )}
 
         {/* ── Tabs ────────────────────────────────────────────────────────── */}
         <div className="flex flex-wrap gap-2 items-center">
 
-          {/* YTD */}
-          <Tab active={selectedMonth === 'ytd'} onClick={() => { setSelectedMonth('ytd'); setShowPastMonths(false); setShowPastWeeks(false); }}>
-            📊 YTD
-          </Tab>
-          <Tab active={selectedMonth === 'last-year'} onClick={() => { setSelectedMonth('last-year'); setShowPastMonths(false); setShowPastWeeks(false); }}>
-            🗓 {lastYear}
-          </Tab>
+          {/* YTD / past years split button */}
+          <div className="relative">
+            <div
+              className="flex items-stretch rounded-lg overflow-hidden"
+              style={{ border: selectedMonth === 'ytd' || selectedMonth === 'last-year' ? '1px solid var(--gold)' : '1px solid var(--border)' }}
+            >
+              <button
+                onClick={() => { setSelectedMonth('ytd'); setShowPastMonths(false); setShowPastWeeks(false); setShowYearDropdown(false); }}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all"
+                style={{
+                  background: selectedMonth === 'ytd' || selectedMonth === 'last-year' ? 'rgba(201,168,76,0.1)' : 'var(--bg-card)',
+                  color: selectedMonth === 'ytd' || selectedMonth === 'last-year' ? 'var(--gold)' : 'var(--text-muted)',
+                  fontWeight: selectedMonth === 'ytd' || selectedMonth === 'last-year' ? 700 : 500,
+                }}
+              >
+                📊 {selectedMonth === 'last-year' ? lastYear : 'YTD'}
+              </button>
+              <button
+                onClick={() => { setShowYearDropdown(p => !p); setShowPastMonths(false); setShowPastWeeks(false); }}
+                className="px-2 py-1.5 text-xs transition-all"
+                style={{
+                  background: showYearDropdown ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.05)',
+                  color: 'var(--text-muted)',
+                  borderLeft: '1px solid var(--border)',
+                }}
+              >
+                {showYearDropdown ? '▲' : '▾'}
+              </button>
+            </div>
+            {showYearDropdown && (
+              <div
+                className="absolute top-full left-0 mt-1 rounded-xl overflow-hidden z-20 min-w-max"
+                style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
+              >
+                <button
+                  onClick={() => { setSelectedMonth('ytd'); setShowYearDropdown(false); }}
+                  className="block w-full text-left px-4 py-2.5 text-sm"
+                  style={{
+                    background: selectedMonth === 'ytd' ? 'rgba(201,168,76,0.1)' : 'transparent',
+                    color: selectedMonth === 'ytd' ? 'var(--gold)' : 'var(--text-muted)',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = selectedMonth === 'ytd' ? 'rgba(201,168,76,0.1)' : 'transparent')}
+                >
+                  {new Date().getFullYear()} (YTD)
+                </button>
+                <button
+                  onClick={() => { setSelectedMonth('last-year'); setShowYearDropdown(false); }}
+                  className="block w-full text-left px-4 py-2.5 text-sm"
+                  style={{
+                    background: selectedMonth === 'last-year' ? 'rgba(201,168,76,0.1)' : 'transparent',
+                    color: selectedMonth === 'last-year' ? 'var(--gold)' : 'var(--text-muted)',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = selectedMonth === 'last-year' ? 'rgba(201,168,76,0.1)' : 'transparent')}
+                >
+                  {lastYear}
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* This Month + previous months dropdown */}
           {data && data.months.length > 0 && (
@@ -430,6 +518,42 @@ export default function LeaderboardPage() {
 
         </div>
 
+        {/* ── Rep filter pills ────────────────────────────────────────────── */}
+        {data && data.leaderboard.length > 0 && (
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
+              Filter:
+            </span>
+            <button
+              onClick={() => setSelectedRep(null)}
+              className="px-3 py-1 rounded-full text-xs font-medium transition-all"
+              style={{
+                background: !selectedRep ? 'var(--gold)' : 'var(--bg-card)',
+                color: !selectedRep ? '#000' : 'var(--text-muted)',
+                border: !selectedRep ? '1px solid var(--gold)' : '1px solid var(--border)',
+                fontWeight: !selectedRep ? 700 : 500,
+              }}
+            >
+              All Closers
+            </button>
+            {data.leaderboard.map(c => (
+              <button
+                key={c.name}
+                onClick={() => setSelectedRep(selectedRep === c.name ? null : c.name)}
+                className="px-3 py-1 rounded-full text-xs font-medium transition-all"
+                style={{
+                  background: selectedRep === c.name ? 'var(--gold)' : 'var(--bg-card)',
+                  color: selectedRep === c.name ? '#000' : 'var(--text-muted)',
+                  border: selectedRep === c.name ? '1px solid var(--gold)' : '1px solid var(--border)',
+                  fontWeight: selectedRep === c.name ? 700 : 500,
+                }}
+              >
+                {c.name.split(' ')[0]}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* ── Leaderboard table ───────────────────────────────────────────── */}
         <section
           className="rounded-xl overflow-hidden gold-border-glow"
@@ -475,18 +599,26 @@ export default function LeaderboardPage() {
                 <tbody>
                   {displayData.map((c, idx) => {
                     const isFirst = idx === 0;
+                    const isHighlighted = selectedRep === c.name;
                     const crStyle = closeRateStyle(c.closeRatePerSit);
                     const barPct = (c.revenue / maxRevenue) * 100;
                     return (
                       <tr
                         key={c.name}
+                        onClick={() => setSelectedRep(selectedRep === c.name ? null : c.name)}
                         style={{
                           borderBottom: idx < displayData.length - 1 ? '1px solid var(--border)' : 'none',
-                          background: isFirst ? 'rgba(201,168,76,0.04)' : 'transparent',
+                          background: isHighlighted
+                            ? 'rgba(201,168,76,0.08)'
+                            : isFirst ? 'rgba(201,168,76,0.04)' : 'transparent',
                           transition: 'background 0.15s',
+                          cursor: 'pointer',
+                          boxShadow: isHighlighted ? 'inset 3px 0 0 var(--gold)' : 'none',
                         }}
                         onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.02)')}
-                        onMouseLeave={e => (e.currentTarget.style.background = isFirst ? 'rgba(201,168,76,0.04)' : 'transparent')}
+                        onMouseLeave={e => (e.currentTarget.style.background = isHighlighted
+                          ? 'rgba(201,168,76,0.08)'
+                          : isFirst ? 'rgba(201,168,76,0.04)' : 'transparent')}
                       >
                         {/* Rank */}
                         <TD>
