@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 interface PeriodStats {
   revenue: number;
   deals: number;
+  sits: number;
 }
 
 interface CloserStats {
@@ -147,26 +148,40 @@ export default function LeaderboardPage() {
     if (selectedMonth === 'last-year') {
       const prefix = `${lastYear}-`;
       return data.leaderboard
-        .map(c => ({
-          ...c,
-          revenue: Object.entries(c.monthly)
-            .filter(([k]) => k.startsWith(prefix))
-            .reduce((s, [, v]) => s + v.revenue, 0),
-          deals: Object.entries(c.monthly)
-            .filter(([k]) => k.startsWith(prefix))
-            .reduce((s, [, v]) => s + v.deals, 0),
-        }))
+        .map(c => {
+          const entries = Object.entries(c.monthly).filter(([k]) => k.startsWith(prefix));
+          const revenue = entries.reduce((s, [, v]) => s + v.revenue, 0);
+          const deals = entries.reduce((s, [, v]) => s + v.deals, 0);
+          const sits = entries.reduce((s, [, v]) => s + (v.sits ?? 0), 0);
+          return {
+            ...c,
+            revenue,
+            deals,
+            sits,
+            closeRatePerSit: sits > 0 ? deals / sits : 0,
+            revenuePerSit: sits > 0 ? revenue / sits : 0,
+          };
+        })
         .filter(c => c.revenue > 0)
         .sort((a, b) => b.revenue - a.revenue)
         .map((c, i) => ({ ...c, rank: i + 1 }));
     }
     const periodMap = isWeekKey(selectedMonth) ? 'weekly' : 'monthly';
     return data.leaderboard
-      .map(c => ({
-        ...c,
-        revenue: c[periodMap][selectedMonth]?.revenue ?? 0,
-        deals: c[periodMap][selectedMonth]?.deals ?? 0,
-      }))
+      .map(c => {
+        const period = c[periodMap][selectedMonth];
+        const revenue = period?.revenue ?? 0;
+        const deals = period?.deals ?? 0;
+        const sits = period?.sits ?? 0;
+        return {
+          ...c,
+          revenue,
+          deals,
+          sits,
+          closeRatePerSit: sits > 0 ? deals / sits : 0,
+          revenuePerSit: sits > 0 ? revenue / sits : 0,
+        };
+      })
       .filter(c => c.revenue > 0)
       .sort((a, b) => b.revenue - a.revenue)
       .map((c, i) => ({ ...c, rank: i + 1 }));
@@ -193,10 +208,10 @@ export default function LeaderboardPage() {
     ? data.leaderboard.reduce((s, c) => s + (c.monthly[data.months[0].key]?.revenue ?? 0), 0)
     : 0;
 
-  const avgCloseRate =
-    data && data.leaderboard.length > 0
-      ? data.leaderboard.reduce((s, c) => s + c.closeRatePerSit, 0) / data.leaderboard.filter(c => c.sits > 0).length
-      : 0;
+  const ratedDisplay = displayData.filter(c => c.sits > 0);
+  const avgCloseRate = ratedDisplay.length > 0
+    ? ratedDisplay.reduce((s, c) => s + c.closeRatePerSit, 0) / ratedDisplay.length
+    : 0;
 
   const topPerformer = data?.leaderboard[0];
 
@@ -307,14 +322,14 @@ export default function LeaderboardPage() {
               <StatCard label={`Revenue (${periodLabel})`} value={fmt$(selectedRepPeriod?.revenue ?? 0)} gold />
               <StatCard label={`Deals (${periodLabel})`} value={String(selectedRepPeriod?.deals ?? 0)} />
               <StatCard
-                label="Close Rate / Sit (YTD)"
-                value={fmtPct(selectedRepYTD.closeRatePerSit)}
-                sub={`${selectedRepYTD.sits} sits YTD`}
+                label={`Close Rate / Sit (${periodLabel})`}
+                value={selectedRepPeriod && selectedRepPeriod.sits > 0 ? fmtPct(selectedRepPeriod.closeRatePerSit) : '—'}
+                sub={`${selectedRepPeriod?.sits ?? 0} sits`}
               />
               <StatCard
-                label="Revenue / Sit (YTD)"
-                value={fmt$(selectedRepYTD.revenuePerSit)}
-                sub={`${selectedRepYTD.deals} deals YTD`}
+                label={`Revenue / Sit (${periodLabel})`}
+                value={selectedRepPeriod && selectedRepPeriod.sits > 0 ? fmt$(selectedRepPeriod.revenuePerSit) : '—'}
+                sub={`${selectedRepPeriod?.deals ?? 0} deals`}
               />
             </div>
           </>
@@ -332,8 +347,8 @@ export default function LeaderboardPage() {
               />
             )}
             <StatCard
-              label={selectedMonth === 'ytd' ? 'Team Avg Close Rate' : 'Team Avg Close Rate (YTD)'}
-              value={fmtPct(avgCloseRate)}
+              label={`Team Avg Close Rate (${periodLabel})`}
+              value={ratedDisplay.length > 0 ? fmtPct(avgCloseRate) : '—'}
               sub="per sit"
             />
           </div>
@@ -587,13 +602,9 @@ export default function LeaderboardPage() {
                     <TH>Closer</TH>
                     <TH>Revenue</TH>
                     <TH>Deals</TH>
-                    {selectedMonth === 'ytd' && (
-                      <>
-                        <TH>Appointments</TH>
-                        <TH>Close Rate / Sit</TH>
-                        <TH>Rev / Sit</TH>
-                      </>
-                    )}
+                    <TH>Sits</TH>
+                    <TH>Close Rate / Sit</TH>
+                    <TH>Rev / Sit</TH>
                   </tr>
                 </thead>
                 <tbody>
@@ -670,31 +681,31 @@ export default function LeaderboardPage() {
                           <span className="font-semibold text-white">{c.deals}</span>
                         </TD>
 
-                        {selectedMonth === 'ytd' && (
-                          <>
-                            {/* Appointments */}
-                            <TD>
-                              <span style={{ color: 'var(--text-muted)' }}>{c.sits}</span>
-                            </TD>
+                        {/* Sits */}
+                        <TD>
+                          <span style={{ color: 'var(--text-muted)' }}>{c.sits > 0 ? c.sits : '—'}</span>
+                        </TD>
 
-                            {/* Close rate */}
-                            <TD>
-                              <span
-                                className="inline-block px-2 py-0.5 rounded text-xs font-semibold"
-                                style={{ background: crStyle.bg, color: crStyle.color }}
-                              >
-                                {fmtPct(c.closeRatePerSit)}
-                              </span>
-                            </TD>
+                        {/* Close rate */}
+                        <TD>
+                          {c.sits > 0 ? (
+                            <span
+                              className="inline-block px-2 py-0.5 rounded text-xs font-semibold"
+                              style={{ background: crStyle.bg, color: crStyle.color }}
+                            >
+                              {fmtPct(c.closeRatePerSit)}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>—</span>
+                          )}
+                        </TD>
 
-                            {/* Rev / sit */}
-                            <TD>
-                              <span style={{ color: 'var(--text-muted)' }} className="text-sm">
-                                {fmt$(c.revenuePerSit)}
-                              </span>
-                            </TD>
-                          </>
-                        )}
+                        {/* Rev / sit */}
+                        <TD>
+                          <span style={{ color: 'var(--text-muted)' }} className="text-sm">
+                            {c.sits > 0 ? fmt$(c.revenuePerSit) : '—'}
+                          </span>
+                        </TD>
                       </tr>
                     );
                   })}

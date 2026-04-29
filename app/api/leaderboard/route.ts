@@ -78,8 +78,8 @@ interface CloserAccum {
   deals: number;
   revenue: number;
   seenLeadIds: Set<string>;
-  monthly: Record<string, { revenue: number; deals: number }>;
-  weekly: Record<string, { revenue: number; deals: number }>;
+  monthly: Record<string, { revenue: number; deals: number; sits: number }>;
+  weekly: Record<string, { revenue: number; deals: number; sits: number }>;
 }
 
 export async function GET() {
@@ -136,18 +136,27 @@ export async function GET() {
       c.leads++;
       if (sitCompleted) c.sits++;
 
+      // Track sit per period using soldDate as proxy (best available date)
+      if (sitCompleted && soldDate) {
+        const mk = monthKey(soldDate);
+        const wk = weekKey(soldDate);
+        if (!c.monthly[mk]) c.monthly[mk] = { revenue: 0, deals: 0, sits: 0 };
+        if (!c.weekly[wk]) c.weekly[wk] = { revenue: 0, deals: 0, sits: 0 };
+        c.monthly[mk].sits++;
+        c.weekly[wk].sits++;
+      }
+
       if (isSold && dealValue > 0) {
         c.deals++;
         c.revenue += dealValue;
 
         if (soldDate) {
           const mk = monthKey(soldDate);
-          if (!c.monthly[mk]) c.monthly[mk] = { revenue: 0, deals: 0 };
+          const wk = weekKey(soldDate);
+          if (!c.monthly[mk]) c.monthly[mk] = { revenue: 0, deals: 0, sits: 0 };
+          if (!c.weekly[wk]) c.weekly[wk] = { revenue: 0, deals: 0, sits: 0 };
           c.monthly[mk].revenue += dealValue;
           c.monthly[mk].deals++;
-
-          const wk = weekKey(soldDate);
-          if (!c.weekly[wk]) c.weekly[wk] = { revenue: 0, deals: 0 };
           c.weekly[wk].revenue += dealValue;
           c.weekly[wk].deals++;
         }
