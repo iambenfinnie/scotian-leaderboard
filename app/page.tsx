@@ -142,46 +142,34 @@ export default function LeaderboardPage() {
   const lastYear = new Date().getFullYear() - 1;
 
   // ── Compute display data based on selected tab ───────────────────────────
+  // Note: closeRatePerSit / revenuePerSit are always YTD — sits for non-sold
+  // rows have no date in the sheet so period sit counts are incomplete.
   const displayData: CloserStats[] = (() => {
     if (!data) return [];
     if (selectedMonth === 'ytd') return data.leaderboard;
     if (selectedMonth === 'last-year') {
       const prefix = `${lastYear}-`;
       return data.leaderboard
-        .map(c => {
-          const entries = Object.entries(c.monthly).filter(([k]) => k.startsWith(prefix));
-          const revenue = entries.reduce((s, [, v]) => s + v.revenue, 0);
-          const deals = entries.reduce((s, [, v]) => s + v.deals, 0);
-          const sits = entries.reduce((s, [, v]) => s + (v.sits ?? 0), 0);
-          return {
-            ...c,
-            revenue,
-            deals,
-            sits,
-            closeRatePerSit: sits > 0 ? deals / sits : 0,
-            revenuePerSit: sits > 0 ? revenue / sits : 0,
-          };
-        })
+        .map(c => ({
+          ...c,
+          revenue: Object.entries(c.monthly)
+            .filter(([k]) => k.startsWith(prefix))
+            .reduce((s, [, v]) => s + v.revenue, 0),
+          deals: Object.entries(c.monthly)
+            .filter(([k]) => k.startsWith(prefix))
+            .reduce((s, [, v]) => s + v.deals, 0),
+        }))
         .filter(c => c.revenue > 0)
         .sort((a, b) => b.revenue - a.revenue)
         .map((c, i) => ({ ...c, rank: i + 1 }));
     }
     const periodMap = isWeekKey(selectedMonth) ? 'weekly' : 'monthly';
     return data.leaderboard
-      .map(c => {
-        const period = c[periodMap][selectedMonth];
-        const revenue = period?.revenue ?? 0;
-        const deals = period?.deals ?? 0;
-        const sits = period?.sits ?? 0;
-        return {
-          ...c,
-          revenue,
-          deals,
-          sits,
-          closeRatePerSit: sits > 0 ? deals / sits : 0,
-          revenuePerSit: sits > 0 ? revenue / sits : 0,
-        };
-      })
+      .map(c => ({
+        ...c,
+        revenue: c[periodMap][selectedMonth]?.revenue ?? 0,
+        deals: c[periodMap][selectedMonth]?.deals ?? 0,
+      }))
       .filter(c => c.revenue > 0)
       .sort((a, b) => b.revenue - a.revenue)
       .map((c, i) => ({ ...c, rank: i + 1 }));
@@ -208,9 +196,9 @@ export default function LeaderboardPage() {
     ? data.leaderboard.reduce((s, c) => s + (c.monthly[data.months[0].key]?.revenue ?? 0), 0)
     : 0;
 
-  const ratedDisplay = displayData.filter(c => c.sits > 0);
-  const avgCloseRate = ratedDisplay.length > 0
-    ? ratedDisplay.reduce((s, c) => s + c.closeRatePerSit, 0) / ratedDisplay.length
+  const ratedYTD = data?.leaderboard.filter(c => c.sits > 0) ?? [];
+  const avgCloseRate = ratedYTD.length > 0
+    ? ratedYTD.reduce((s, c) => s + c.closeRatePerSit, 0) / ratedYTD.length
     : 0;
 
   const topPerformer = data?.leaderboard[0];
@@ -322,14 +310,14 @@ export default function LeaderboardPage() {
               <StatCard label={`Revenue (${periodLabel})`} value={fmt$(selectedRepPeriod?.revenue ?? 0)} gold />
               <StatCard label={`Deals (${periodLabel})`} value={String(selectedRepPeriod?.deals ?? 0)} />
               <StatCard
-                label={`Close Rate / Sit (${periodLabel})`}
-                value={selectedRepPeriod && selectedRepPeriod.sits > 0 ? fmtPct(selectedRepPeriod.closeRatePerSit) : '—'}
-                sub={`${selectedRepPeriod?.sits ?? 0} sits`}
+                label="Close Rate / Sit (YTD)"
+                value={selectedRepYTD && selectedRepYTD.sits > 0 ? fmtPct(selectedRepYTD.closeRatePerSit) : '—'}
+                sub={`${selectedRepYTD?.sits ?? 0} sits YTD`}
               />
               <StatCard
-                label={`Revenue / Sit (${periodLabel})`}
-                value={selectedRepPeriod && selectedRepPeriod.sits > 0 ? fmt$(selectedRepPeriod.revenuePerSit) : '—'}
-                sub={`${selectedRepPeriod?.deals ?? 0} deals`}
+                label="Revenue / Sit (YTD)"
+                value={selectedRepYTD && selectedRepYTD.sits > 0 ? fmt$(selectedRepYTD.revenuePerSit) : '—'}
+                sub={`${selectedRepYTD?.deals ?? 0} deals YTD`}
               />
             </div>
           </>
@@ -347,8 +335,8 @@ export default function LeaderboardPage() {
               />
             )}
             <StatCard
-              label={`Team Avg Close Rate (${periodLabel})`}
-              value={ratedDisplay.length > 0 ? fmtPct(avgCloseRate) : '—'}
+              label="Team Avg Close Rate (YTD)"
+              value={ratedYTD.length > 0 ? fmtPct(avgCloseRate) : '—'}
               sub="per sit"
             />
           </div>
